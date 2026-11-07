@@ -1,0 +1,70 @@
+# Once a week, an agent proposes one listing change as a pull request, for a store with no
+# release still being measured. Nothing reaches the stores until someone merges it.
+#
+# Secrets: for the agent, CLAUDE_CODE_OAUTH_TOKEN (run `claude setup-token` on your computer;
+# it uses your Claude Pro or Max plan) or ANTHROPIC_API_KEY (billed per use). APPEEKY_API_KEY
+# for data, reviews and competitors (optional), and ATTRIBUTION_TOKEN with a self-hosted
+# attribution server (optional).
+# Copy propose.md to .github/appeeky-propose.md.
+name: Appeeky Spec weekly proposal
+on:
+  schedule: [{ cron: "0 7 * * 1" }]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    env:
+      APPEEKY_API_KEY: ${{ secrets.APPEEKY_API_KEY }}
+      ATTRIBUTION_TOKEN: ${{ secrets.ATTRIBUTION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      - name: Refresh what the agent reads
+        run: |
+          npx -y @appeeky/spec data pull || true
+          npx -y @appeeky/spec reviews pull || true
+          npx -y @appeeky/spec competitors pull || true
+
+      - name: Find a store that is free to change
+        id: free
+        run: |
+          free=$(npx -y @appeeky/spec status --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).free.join(" ")))')
+          echo "stores=$free" >> "$GITHUB_OUTPUT"
+          [ -n "$free" ] || echo "Every store has a release being measured. Nothing to propose this week."
+
+      - name: Ask the agent for one change
+        if: steps.free.outputs.stores != ''
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude -p "$(cat .github/appeeky-propose.md)
+
+          Stores free to change: ${{ steps.free.outputs.stores }}" \
+            --allowedTools "Read" "Edit" "Write" "Bash(npx @appeeky/spec *)"
+
+      - name: Open the pull request
+        if: steps.free.outputs.stores != ''
+        env:
+          # A pull request opened with the default token does not start other workflows, so the
+          # spec's pull request check would not run on it. A fine-grained token or a GitHub App
+          # token with contents and pull requests write access does: set it as PROPOSAL_TOKEN.
+          GH_TOKEN: ${{ secrets.PROPOSAL_TOKEN || github.token }}
+        run: |
+          if git diff --quiet -- appeeky/store appeeky.spec.yaml || [ ! -f .appeeky/proposal.md ]; then
+            echo "The agent proposed nothing."; exit 0
+          fi
+          branch="listing/weekly-$(date +%F)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add appeeky/store appeeky.spec.yaml
+          git commit -m "$(head -1 .appeeky/proposal.md)"
+          git push origin "$branch"
+          gh pr create --title "$(head -1 .appeeky/proposal.md)" --body-file .appeeky/proposal.md

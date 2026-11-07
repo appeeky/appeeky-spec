@@ -1,0 +1,18 @@
+# Appeeky Spec on your own server: the daily routine, pushes after a merge and
+# (optionally) the weekly agent, on a schedule.
+#
+#   1. Put this file and .env (from .env.example) in one folder.
+#   2. docker compose up -d
+#   3. docker compose logs -f
+#
+# Nothing listens on a port: the container only calls out to GitHub, Appeeky and the stores.
+# More than one app: copy the service, give each its own env file.
+services:
+  appeeky-spec:
+    image: ${APPEEKY_SPEC_IMAGE:-ghcr.io/appeeky/appeeky-spec:latest}
+    command: schedule
+    env_file: .env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

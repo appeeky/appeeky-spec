@@ -1,0 +1,18 @@
+id: 2026-10-20-before-after-hooks-get-installs
+type: ugc
+hypothesis: Before/after sleep hooks on TikTok get installs
+metric: link_installs
+baseline: 0
+target: 40
+startedAt: 2026-10-20T12:00:00.000Z
+checkAfterDays: 14
+status: won
+result:
+  value: 52
+  closedAt: 2026-11-03T09:00:00.000Z
+link:
+  slug: ab12xy
+  url: https://analytics.sleepsounds.workers.dev/l/ab12xy
+  store: google-play
+assets:
+  - https://www.tiktok.com/@sleepsounds/video/7430000000000000001

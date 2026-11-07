@@ -1,0 +1,40 @@
+id: 2026-09-22T09-10-00Z-app-store
+pushedAt: 2026-09-22T09:10:00.000Z
+store: app-store
+target: version 3.0 (prepare for submission)
+via: local
+note: Swap relax for brown noise in the keyword field
+changes:
+  - locale: en-US
+    field: keywords
+    before: insomnia,relax,meditation,storm,thunder,nap,calm,ambient,pink,asmr,forest,deep,tinnitus,fan,waves
+    after: insomnia,brown,meditation,storm,thunder,nap,calm,ambient,pink,asmr,forest,deep,tinnitus,fan,waves
+baseline:
+  at: 2026-09-22T09:09:40.000Z
+  source: App Store search
+  ranks:
+    us: { sleep sounds: 18, white noise: 12, rain sounds: 38, brown noise: 61, baby sleep: 44, ruido blanco: null }
+    tr: { uyku sesleri: 9, beyaz gürültü: 14 }
+checks:
+  - at: 2026-09-29T06:00:00.000Z
+    day: 7
+    ranks:
+      us: { sleep sounds: 17, white noise: 12, rain sounds: 36, brown noise: 29, baby sleep: 43, ruido blanco: null }
+      tr: { uyku sesleri: 9, beyaz gürültü: 13 }
+    improved:
+      - { country: us, keyword: brown noise, before: 61, after: 29 }
+    dropped: []
+    regressions: []
+    verdict: won
+    control: { changed: [us], control: [tr], changedMove: 6.8, controlMove: 0.5, net: 6.3 }
+  - at: 2026-10-06T06:00:00.000Z
+    day: 14
+    ranks:
+      us: { sleep sounds: 17, white noise: 11, rain sounds: 37, brown noise: 24, baby sleep: 42, ruido blanco: null }
+      tr: { uyku sesleri: 10, beyaz gürültü: 13 }
+    improved:
+      - { country: us, keyword: brown noise, before: 61, after: 24 }
+    dropped: []
+    regressions: []
+    verdict: won
+    control: { changed: [us], control: [tr], changedMove: 7.9, controlMove: 0, net: 7.9 }

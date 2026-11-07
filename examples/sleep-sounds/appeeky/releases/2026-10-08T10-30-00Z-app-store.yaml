@@ -1,0 +1,54 @@
+id: 2026-10-08T10-30-00Z-app-store
+pushedAt: 2026-10-08T10:30:00.000Z
+store: app-store
+target: version 3.1 (prepare for submission)
+via: local
+note: Lead with baby sleep for new parents
+changes:
+  - locale: en-US
+    field: subtitle
+    before: Rain sounds for deep sleep
+    after: White, brown noise for baby
+baseline:
+  at: 2026-10-08T10:29:50.000Z
+  source: App Store search
+  ranks:
+    us: { sleep sounds: 17, white noise: 11, rain sounds: 37, brown noise: 24, baby sleep: 42, ruido blanco: null }
+    tr: { uyku sesleri: 10, beyaz gürültü: 13 }
+checks:
+  - at: 2026-10-15T06:00:00.000Z
+    day: 7
+    ranks:
+      us: { sleep sounds: 16, white noise: 8, rain sounds: 44, brown noise: 15, baby sleep: 19, ruido blanco: null }
+      tr: { uyku sesleri: 10, beyaz gürültü: 14 }
+    improved:
+      - { country: us, keyword: white noise, before: 11, after: 8 }
+      - { country: us, keyword: brown noise, before: 24, after: 15 }
+      - { country: us, keyword: baby sleep, before: 42, after: 19 }
+    dropped:
+      - { country: us, keyword: rain sounds, before: 37, after: 44 }
+    regressions: []
+    verdict: won
+    control: { changed: [us], control: [tr], changedMove: 5.2, controlMove: -0.5, net: 5.7 }
+    metrics:
+      source: Appeeky Analytics (self-hosted)
+      before: { from: 2026-10-01, to: 2026-10-08, days: 7, values: { organic_installs: 31, organic_revenue: 41.2, organic_paid: 0.098 }, currency: USD }
+      after: { from: 2026-10-09, to: 2026-10-16, days: 7, values: { organic_installs: 38, organic_revenue: 47.9, organic_paid: 0.101 }, currency: USD }
+      changes:
+        - { metric: organic_installs, before: 31, after: 38, change: 0.226, outcome: better, noise: 0.11 }
+        - { metric: organic_revenue, before: 41.2, after: 47.9, change: 0.163, outcome: better, noise: 0.14 }
+        - { metric: organic_paid, before: 0.098, after: 0.101, change: 0.031, outcome: flat, noise: 0.08 }
+  - at: 2026-10-22T06:00:00.000Z
+    day: 14
+    ranks:
+      us: { sleep sounds: 16, white noise: 8, rain sounds: 45, brown noise: 14, baby sleep: 17, ruido blanco: null }
+      tr: { uyku sesleri: 10, beyaz gürültü: 13 }
+    improved:
+      - { country: us, keyword: white noise, before: 11, after: 8 }
+      - { country: us, keyword: brown noise, before: 24, after: 14 }
+      - { country: us, keyword: baby sleep, before: 42, after: 17 }
+    dropped:
+      - { country: us, keyword: rain sounds, before: 37, after: 45 }
+    regressions: []
+    verdict: won
+    control: { changed: [us], control: [tr], changedMove: 5.7, controlMove: 0, net: 5.7 }

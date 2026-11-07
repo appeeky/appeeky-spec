@@ -1,0 +1,55 @@
+name: Appeeky Spec
+description: Check store listing changes in a pull request and comment what they do to keyword coverage.
+author: Appeeky
+branding:
+  icon: search
+  color: gray-dark
+
+inputs:
+  working-directory:
+    description: Folder that holds appeeky.spec.yaml
+    default: "."
+  base:
+    description: Git ref to compare with (needs `fetch-depth: 0` on checkout)
+    default: ""
+  comment:
+    description: Post or update a pull request comment with the report
+    default: "true"
+  version:
+    description: "@appeeky/spec version"
+    default: "latest"
+  github-token:
+    description: Token used to comment
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Report
+      id: report
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE: ${{ inputs.base || format('origin/{0}', github.base_ref || 'main') }}
+      run: |
+        set +e
+        npx -y "@appeeky/spec@${{ inputs.version }}" report --base "$BASE" --output "$RUNNER_TEMP/appeeky-spec.md"
+        echo "status=$?" >> "$GITHUB_OUTPUT"
+        cat "$RUNNER_TEMP/appeeky-spec.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --edit-last --body-file "$RUNNER_TEMP/appeeky-spec.md" 2>/dev/null \
+          || gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/appeeky-spec.md"
+
+    - name: Fail on check errors
+      if: steps.report.outputs.status != '0'
+      shell: bash
+      run: |
+        echo "::error::appeeky-spec check found errors in the listings."
+        exit 1

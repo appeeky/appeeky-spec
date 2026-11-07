@@ -1,0 +1,17 @@
+id: 2026-10-29T08-00-00Z-app-store
+pushedAt: 2026-10-29T08:00:00.000Z
+store: app-store
+target: version 3.2 (prepare for submission)
+via: local
+note: Win US searches in Spanish
+changes:
+  - locale: es-MX
+    field: keywords
+    before: dormir,lluvia,bebe,relajacion
+    after: ruido blanco,dormir,lluvia,bebe,ruido marron
+baseline:
+  at: 2026-10-29T07:59:40.000Z
+  source: App Store search
+  ranks:
+    us: { sleep sounds: 16, white noise: 8, rain sounds: 45, brown noise: 14, baby sleep: 17, ruido blanco: null }
+    tr: { uyku sesleri: 10, beyaz gürültü: 13 }

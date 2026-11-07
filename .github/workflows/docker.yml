@@ -1,0 +1,59 @@
+name: Docker image
+
+# Publishes ghcr.io/appeeky/appeeky-spec for running the routines outside GitHub Actions
+# (docker/docker-compose.yml). CI calls it after each release; it can also run by hand for a tag.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build, like v0.1.0
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, like v0.1.0
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant:
+          - { suffix: "", agent: "0" }
+          - { suffix: "-agent", agent: "1" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/appeeky/appeeky-spec
+          flavor: suffix=${{ matrix.variant.suffix }},onlatest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: AGENT=${{ matrix.variant.agent }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

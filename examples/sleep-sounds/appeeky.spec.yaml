@@ -1,0 +1,25 @@
+# Appeeky Spec: your app's store presence as a spec.
+# Docs: https://github.com/appeeky/appeeky-spec
+
+version: 1
+app:
+  name: Sleep Sounds
+  primaryLocale: en-US
+stores:
+  appStore:
+    appId: "1234567890"
+    via: auto
+  googlePlay:
+    packageName: com.example.sleep
+    via: auto
+targets:
+  us:
+    - sleep sounds
+    - white noise
+    - rain sounds
+    - brown noise
+    - baby sleep
+    - ruido blanco
+  tr:
+    - uyku sesleri
+    - beyaz gürültü

@@ -1,0 +1,13 @@
+id: 2026-10-31-screenshots-lead-with-baby
+type: screenshots
+hypothesis: A first screenshot with a sleeping baby lifts conversion for new parents
+persona: new-parents
+store: app-store
+country: us
+metric: conversion
+baseline: 0.031
+startedAt: 2026-10-31T09:00:00.000Z
+checkAfterDays: 14
+status: running
+assets:
+  - appeeky/screenshots/app-store/en-US/01-baby.png
