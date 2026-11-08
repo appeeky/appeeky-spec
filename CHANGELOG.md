@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-11-08)
+
+### Fixes
+
+- close link experiments in verify, send review replies on merge, keep the Search Ads currency, report screenshot errors (#2) ([b8b35c7](https://github.com/appeeky/appeeky-spec/commit/b8b35c7e8b1bbc9794b21727da7cbb29e9d6fe03))
+
 ## 0.2.0 (2026-11-08)
 
 - `search-ads pull`: Apple Search Ads on your own API key, no Appeeky account. The key lives on your App Store Connect CLI account next to the App Store Connect key (`appstore accounts search-ads`), and Spec calls Apple through `appstore search-ads call`; in CI, `ASA_CLIENT_ID`, `ASA_TEAM_ID`, `ASA_KEY_ID` and `ASA_PRIVATE_KEY` work instead. Reads the campaigns for the App Store app (`stores.appStore.searchAds` picks the org and campaigns) and writes spend, installs, taps and impressions per day, keywords, search terms and `summary.md` (search terms that installed and are not targets, keywords that spent and brought nothing) to `appeeky/search-ads/`. `ads` and `verify` read it. The daily routines pull it when the key is set.
