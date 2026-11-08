@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { installedTargets } from "./agents.js";
 import { SPEC_DIR, SPEC_FILE } from "./files.js";
 import type { Project, StoreId } from "./schema.js";
 import { normalize, words } from "./text.js";
@@ -120,11 +121,12 @@ jobs:
           fetch-depth: 0     # the report compares with main
       - uses: appeeky/appeeky-spec@v0
 `,
-  "listing-push.yml": `# Appeeky Spec: push the listing to the stores when a change is merged.
+  "listing-push.yml": `# Appeeky Spec: push the listing to the stores when a change is merged, and send the
+# social posts and make the UGC clips a merged pull request approved.
 on:
   push:
     branches: [main]
-    paths: ["appeeky/store/**", "appeeky.spec.yaml"]
+    paths: ["appeeky/store/**", "appeeky.spec.yaml", "appeeky/social/drafts/**", "appeeky/ugc/briefs/**"]
 permissions:
   contents: write          # to commit the release file
 jobs:
@@ -133,15 +135,22 @@ jobs:
     environment: stores    # optional: a required approval before it runs
     steps:
       - uses: actions/checkout@v4
-      - run: npx @appeeky/spec push --yes --note "\${{ github.event.head_commit.message }}"
+      - run: |
+          npx @appeeky/spec push --yes --note "\${{ github.event.head_commit.message }}"
+          npx @appeeky/spec social push --yes
+          npx @appeeky/spec ugc generate --yes \${FAL_KEY:+--local}
         env:
           APPEEKY_API_KEY: \${{ secrets.APPEEKY_API_KEY }}
+          FAL_KEY: \${{ secrets.FAL_KEY }}    # optional: render clips on your own fal account
+      - uses: actions/upload-artifact@v4      # clips made with FAL_KEY, kept with the run
+        if: hashFiles('.appeeky/media/*.mp4') != ''
+        with: { name: ugc-clips, path: .appeeky/media/*.mp4 }
       - run: |
           git config user.name "appeeky-spec"
           git config user.email "spec@users.noreply.github.com"
-          git add appeeky && git commit -m "Record release" && git push || true
+          git add appeeky && git commit -m "Record release, posts and clips" && git push || true
 `,
-  "listing-daily.yml": `# Appeeky Spec: record the category rank and AI visibility, measure releases on day 7 and 14, refresh reviews and competitors.
+  "listing-daily.yml": `# Appeeky Spec: record the category rank, AI visibility and Google search, measure releases on day 7 and 14, refresh reviews and competitors.
 on:
   schedule: [{ cron: "0 6 * * *" }]   # 06:00 UTC
   workflow_dispatch:
@@ -158,12 +167,34 @@ jobs:
           npx @appeeky/spec verify --playbook
           npx @appeeky/spec reviews pull || true
           npx @appeeky/spec competitors pull || true
+          npx @appeeky/spec social pull || true
+          npx @appeeky/spec ugc pull || true
+          # Your own keys: Search Console with a service account, Apple Search Ads with an API user, Google ranks on
+          # DataForSEO every SEO_RANKS_EVERY days (default 7), and AI visibility every N days
+          # (set the repository variable VISIBILITY_EVERY, e.g. 7) on OpenAI, Anthropic, Gemini or Perplexity.
+          if [ -n "$GSC_CREDENTIALS" ]; then npx @appeeky/spec seo pull || true; fi
+          if [ -n "$ASA_CLIENT_ID" ]; then npx @appeeky/spec search-ads pull || true; fi
+          if [ -n "$DATAFORSEO_LOGIN" ]; then npx @appeeky/spec seo ranks --every "\${SEO_RANKS_EVERY:-7}" --yes || true; fi
+          if [ -n "$VISIBILITY_EVERY" ]; then npx @appeeky/spec visibility scan --local --every "$VISIBILITY_EVERY" --yes || true; fi
         env:
           APPEEKY_API_KEY: \${{ secrets.APPEEKY_API_KEY }}
+          GSC_CREDENTIALS: \${{ secrets.GSC_CREDENTIALS }}
+          ASA_CLIENT_ID: \${{ secrets.ASA_CLIENT_ID }}
+          ASA_TEAM_ID: \${{ secrets.ASA_TEAM_ID }}
+          ASA_KEY_ID: \${{ secrets.ASA_KEY_ID }}
+          ASA_PRIVATE_KEY: \${{ secrets.ASA_PRIVATE_KEY }}
+          DATAFORSEO_LOGIN: \${{ secrets.DATAFORSEO_LOGIN }}
+          DATAFORSEO_PASSWORD: \${{ secrets.DATAFORSEO_PASSWORD }}
+          SEO_RANKS_EVERY: \${{ vars.SEO_RANKS_EVERY }}
+          VISIBILITY_EVERY: \${{ vars.VISIBILITY_EVERY }}
+          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: \${{ secrets.GEMINI_API_KEY }}
+          PERPLEXITY_API_KEY: \${{ secrets.PERPLEXITY_API_KEY }}
       - run: |
           git config user.name "appeeky-spec"
           git config user.email "spec@users.noreply.github.com"
-          git add appeeky && git commit -m "Daily: category, AI visibility, verify, reviews, competitors" && git push || true
+          git add appeeky && git commit -m "Daily: category, AI visibility, search, Search Ads, verify, reviews, competitors, social, UGC" && git push || true
 `,
 };
 
@@ -256,6 +287,9 @@ export function diagnose(root: string, project: Project | null, env: NodeJS.Proc
 
   const skills = [".claude/skills/appeeky-spec", ".agents/skills/appeeky-spec", ".cursor/skills/appeeky-spec"].some((p) => existsSync(join(root, p)));
   out.push(skills ? ok("agent skills", "installed") : warn("agent skills", "Not installed in this repo", "Optional: `npx skills add appeeky/appeeky-spec`."));
+
+  const specialists = installedTargets(root);
+  out.push(specialists.length ? ok("specialist agents", `installed for ${specialists.join(", ")}`) : warn("specialist agents", "Not installed: no co-founder review in this repo", "Optional: `npx @appeeky/spec agents install` (add --for opencode or all)."));
 
   const ignore = existsSync(join(root, ".gitignore")) ? readFileSync(join(root, ".gitignore"), "utf8") : "";
   if (!/\.appeeky\/?(\s|$)|\.appeeky\/data|\.appeeky\/\*/m.test(ignore)) out.push(warn(".gitignore", ".appeeky/ is not ignored: data and cache could be committed", "Add `.appeeky/` to .gitignore."));

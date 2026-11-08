@@ -21,6 +21,19 @@ const appStoreConfig = z
     via: transportMode.default("auto"),
     /** Named account of the local `appstore` CLI. */
     account: z.string().optional(),
+    /**
+     * Apple Search Ads on your own API key (ASA_CLIENT_ID, ASA_TEAM_ID, ASA_KEY_ID, ASA_PRIVATE_KEY):
+     * `search-ads pull` reads this app's campaigns. Without it, Search Ads comes from Appeeky.
+     */
+    searchAds: z
+      .object({
+        /** The organization, when the key reaches more than one. */
+        orgId: z.string().regex(/^\d+$/, "Use the numeric org id from Apple Search Ads → Account Settings").optional(),
+        /** Only these campaign ids; default: every campaign for this app. */
+        campaigns: z.array(z.string().regex(/^\d+$/)).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -155,6 +168,28 @@ export const specFileSchema = z
         countries: z.array(countryCode).min(1).optional(),
         /** What people ask AI assistants, per storefront. `visibility sync` sends them to Appeeky. */
         intents: z.record(countryCode, z.array(aiIntent)).default({}),
+        /** Assistants `visibility scan --local` asks, among those with a key set; defaults to all of them. */
+        models: z.array(z.enum(["chatgpt", "claude", "gemini", "perplexity"])).min(1).optional(),
+        /** Other names the assistants may use for the app, e.g. the brand without the subtitle. */
+        aliases: z.array(z.string().min(2)).optional(),
+      })
+      .strict()
+      .optional(),
+    /**
+     * The app's website. `seo check` reads it for search and AI readiness; `seo pull` records
+     * its Google Search Console clicks with your own service account.
+     */
+    web: z
+      .object({
+        url: z.string().url(),
+        /** Search Console property: "sc-domain:example.com" or "https://example.com/"; defaults to the url's domain. */
+        searchConsole: z.string().min(3).optional(),
+        /** Google searches to watch with `seo ranks` and `seo keywords`, per storefront; default: the store targets. */
+        keywords: z.record(countryCode, z.array(z.string().min(1))).optional(),
+        /** Storefronts to watch; default: the first one under keywords or targets. */
+        countries: z.array(countryCode).min(1).optional(),
+        /** The results page to read; default mobile, where people look for apps. */
+        device: z.enum(["mobile", "desktop"]).optional(),
       })
       .strict()
       .optional(),

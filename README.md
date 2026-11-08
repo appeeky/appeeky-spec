@@ -1,29 +1,75 @@
 # Appeeky Spec
 
-**Your app's store listing as a spec.** Keep the name, subtitle, keywords and descriptions for every locale in your repo, check them against store limits and ASO rules, see which searches they cover, diff them with the live store and push them to App Store Connect and Google Play. Every push is recorded, so you can see what changed, measure it and roll it back.
+<img src="https://cdn.jsdelivr.net/npm/@appeeky/spec/.github/assets/cover.gif" alt="Animated pixel-art night sky over a hilltop: a puffin in a scarf hops between Grok, Claude Code, Codex and Cursor on the left and Gemini CLI, opencode, T3 Code and Zed on the right. Above them: App growth, run by your coding agent, the features with their logos and the places it runs, from GitHub Actions and Docker to Hetzner, DigitalOcean, AWS, Google Cloud, Railway, Fly.io and Render." width="100%" />
+
+**App growth, run by your coding agent.**
+
+Appeeky Spec puts your app's whole growth loop in one folder of your repo: the store listing and the searches it should win, reviews and competitors, what AI assistants say about the app, ads, experiments, and what every past change did. Your coding agent (Claude Code, Codex, Cursor, Gemini CLI and others) reads it and proposes the next change as a pull request. You merge it. The change is checked against the store rules, pushed to App Store Connect and Google Play, and measured on day 7 and day 14, and the result goes into a playbook the next change starts from.
+
+[![npm](https://img.shields.io/npm/v/@appeeky/spec.svg)](https://www.npmjs.com/package/@appeeky/spec) [![CI](https://github.com/appeeky/appeeky-spec/actions/workflows/ci.yml/badge.svg)](https://github.com/appeeky/appeeky-spec/actions/workflows/ci.yml) [![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-blue.svg)](LICENSE)
+
+> **Status: 0.x.** Commands and file formats can still change between minor versions. See the [changelog](CHANGELOG.md).
+
+## Quick start
 
 ```bash
-npx @appeeky/spec init          # guided: finds your app, pulls the listing, suggests targets, adds CI
-npx @appeeky/spec doctor        # what is set up, what is missing, how to fix it
-npx @appeeky/spec check
-npx @appeeky/spec coverage
-npx @appeeky/spec diff
-npx @appeeky/spec push --note "Lead with white noise in the US"
+npx @appeeky/spec init          # finds your app, pulls the listing, suggests targets, adds CI
+npx skills add appeeky/appeeky-spec   # teaches your coding agent the workflow
 ```
+
+Then ask your agent something like *"we're launching in Germany next week"* or *"why did we drop for white noise?"*. It works with the same commands you can run yourself:
+
+```bash
+npx @appeeky/spec doctor        # what is set up, what is missing, how to fix it
+npx @appeeky/spec coverage      # which searches each storefront is found for
+npx @appeeky/spec check         # store limits and ASO rules
+npx @appeeky/spec diff          # the spec against the live store
+npx @appeeky/spec push --note "Lead with white noise in the US"
+npx @appeeky/spec verify        # day 7 and day 14: did it work?
+```
+
+`pnpm dlx`, `yarn dlx` and `bunx` work the same way. Node 20 or later.
 
 `init` with no options asks for the app's name, finds it on the App Store, checks the Google Play package, pulls every store it can reach, suggests five targets from what the app already ranks for, offers the GitHub workflows (`--ci`) and the agent skills, and ends on the first coverage table. With options (`--name`, `--app-store`, `--google-play`, `--pull`) it does the same without questions, for scripts. It also adds `.appeeky/` to `.gitignore`.
 
+## What it does
+
+| Feature | What you get |
+| --- | --- |
+| **Listing as code** | Name, subtitle, keywords, descriptions and what's new for every locale, as YAML in your repo. Changes go through pull requests like code. |
+| **Checked before it ships** | Store limits, wasted keyword space, words repeated between name, subtitle and keyword field, Google Play title policy and screenshot sizes. |
+| **Keyword coverage** | Which of your target searches each storefront indexes, weighted by popularity, with words to add and the spare space in secondary locales. |
+| **Pushed to both stores** | App Store Connect and Google Play, with your own keys or through your Appeeky connection. Every push writes a release file; `revert` puts the old values back. |
+| **Measured** | Day 7 and day 14: search ranks, conversion, downloads, revenue and ads, against storefronts the release did not change. The verdict goes into `appeeky/playbook.md`. |
+| **What users and rivals say** | Reviews with a summary and drafted replies, competitors' listings and moves, and the category chart rank, one row a day. |
+| **AI visibility** | Whether ChatGPT, Claude, Gemini and Perplexity name your app, who they name instead and the pages they cite. |
+| **Ads and data** | Apple Search Ads, Meta and TikTok spend and installs, App Store Connect, Google Play and RevenueCat numbers as CSV your agent can read. |
+| **Specialists and a co-founder** | Six read-only specialist subagents (ASO, reviews, ads, releases, UGC, social) and a co-founder review that starts them, writes a brief to `appeeky/briefs/` and opens a pull request with one listing change. Run it as `/appeeky-cofounder`, or once a week on your Claude plan. |
+
+## How a change goes live
+
+```mermaid
+flowchart LR
+  A["Your agent edits<br/>appeeky/store/"] --> B["Pull request<br/>check + coverage comment"]
+  B --> C{"You merge"}
+  C --> D["push to App Store Connect<br/>and Google Play"]
+  D --> E["verify on day 7 and 14<br/>with a control group"]
+  E --> F["playbook.md<br/>what worked"]
+  F --> A
+```
+
+Nothing reaches the stores until a person merges. The merge is the approval.
+
+## Where it runs
+
+| Where | How |
+| --- | --- |
+| **GitHub Actions** | `init --ci` writes three workflows: a check on every pull request, a push on merge, and a daily run that measures and commits. See [In pull requests](#in-pull-requests). |
+| **Your own server** | `docker compose up -d` on any VM: Hetzner, DigitalOcean, AWS, Google Cloud, Railway, Fly.io, Render or a machine in your office. See [Running without GitHub Actions](#running-without-github-actions). |
+| **Your computer** | Every command runs locally with `npx`. `examples/weekly/` has a cron script for the weekly co-founder review. |
+| **Other CI** | GitLab, Bitbucket or CircleCI: the same three triggers and commands. |
+
 Powered by [Appeeky](https://appeeky.com). Works with your own store keys on your machine, or with your Appeeky connection when you'd rather not handle keys.
-
-## Why
-
-Store metadata usually lives in a web form. Nobody reviews it, nobody knows what changed last month, and a keyword that ranked well gets dropped by accident. Appeeky Spec moves it into files:
-
-- **Reviewable.** Listing changes go through pull requests like code.
-- **Checked.** Limits, wasted keyword space, words repeated between name, subtitle and keyword field, and Google Play title policy are caught before you push.
-- **Measured.** `coverage` shows which of your target searches each storefront indexes, weighted by search popularity.
-- **Recorded.** Every push writes a release file with before and after values. `revert` puts the old values back.
-- **Agent-friendly.** Plain YAML plus `--json` on every command, so coding agents can propose and apply changes safely.
 
 ## Layout
 
@@ -37,6 +83,8 @@ appeeky/
   reviews/                        # customer reviews (JSONL per month), summary.md, replies/ drafted for review
   competitors/                    # one file per competitor: listing, ranks, recent reviews
   visibility/<country>.yaml       # what ChatGPT, Claude, Gemini and Perplexity answer: named or not, who instead, cited pages
+  seo/                            # Google Search Console for the website: clicks per day, queries, pages, summary.md
+  search-ads/                     # Apple Search Ads on your own key: spend and installs per day, keywords, search terms
   category.csv                    # rank in the category chart, one row a day
   playbook.md                     # what worked and what did not for this app
 .appeeky/data/                    # analytics, ads and revenue as CSV (gitignored; data.commit moves it to appeeky/data/)
@@ -80,7 +128,9 @@ A field you leave out of a listing file is not managed by the spec: it is never 
 | `ads` | Spend, installs and cost per install of your paid channels over the last `--days` (default 30): Apple Search Ads, plus the Meta and TikTok campaigns under `ads:`. `--save` writes them to `appeeky/ads/<date>.yaml`. Needs `APPEEKY_API_KEY`. |
 | `reviews pull\|list\|reply\|push` | Customer reviews from both stores into `appeeky/reviews/`, with `summary.md`. `reply <id> --text` drafts an answer in `appeeky/reviews/replies/` for a pull request; `push` sends the drafts. |
 | `competitors discover\|pull` | `discover` lists apps like yours (`--add <n>` puts them in the spec). `pull` writes each competitor's listing, the searches it ranks for and its recent reviews to `appeeky/competitors/`. |
-| `visibility init\|sync\|pull\|scan` | AI visibility: whether ChatGPT, Claude, Gemini and Perplexity name your app. `init` writes the intents and prompts Appeeky tracks into the spec, `sync` sends your edits back, `pull` writes the answers to `appeeky/visibility/`, `scan` asks the assistants now. Needs `APPEEKY_API_KEY`. |
+| `visibility init\|sync\|pull\|scan` | AI visibility: whether ChatGPT, Claude, Gemini and Perplexity name your app. `init` writes the intents and prompts Appeeky tracks into the spec, `sync` sends your edits back, `pull` writes the answers to `appeeky/visibility/`, `scan` asks the assistants now. Needs `APPEEKY_API_KEY`, or with `init --local` / `scan --local` your own OpenAI, Anthropic, Gemini or Perplexity key. |
+| `search-ads pull` | Apple Search Ads on your own API key: this app's spend, installs, keywords and search terms in `appeeky/search-ads/`, with the search terms that installed and are not targets yet. `ads` and `verify` read it. |
+| `seo check\|llms\|pull\|ranks\|keywords\|domain` | The app's website in Google and in AI answers. `check` lists what is missing for search, for the app and for AI crawlers; `llms` writes llms.txt from the listing; `pull` writes Search Console clicks, queries and pages to `appeeky/seo/` (`GSC_CREDENTIALS`). On your own DataForSEO account: `ranks` (Google positions of the site and the store page, and AI Overview citations), `keywords` (volume, difficulty, ideas) and `domain` (what the site ranks for, competing sites). |
 | `category pull` | Record today's rank in the category chart (top 100) in `appeeky/category.csv`. App Store needs no key; Google Play needs `APPEEKY_API_KEY` and `category.googlePlay`. |
 | `data pull` | App Store Connect, Google Play, Apple Search Ads, RevenueCat, Meta and TikTok numbers per day, and attribution by source, keyword and smart link, as CSV files with an index (`--days`, default 90). |
 | `status` | Every change being measured, in one list: releases and experiments, the metric that decides each, the next check and the result so far. Flags checks that are late, releases measured over the same days, and results built on too few installs. Rewrites `appeeky/loops.md`. |
@@ -89,6 +139,9 @@ A field you leave out of a listing file is not managed by the spec: it is never 
 | `experiment add\|list\|close` | Track growth experiments outside the listing (screenshots, UGC, ads, pricing) with one metric and a check date. |
 | `screenshots pull\|check` | Download the live App Store screenshots into `appeeky/screenshots/` and check their sizes. |
 | `report` | Markdown for a pull request: listing changes, check results and coverage against `--base`. |
+| `social pull\|check\|push` | Organic social media through the accounts connected in Appeeky: `pull` writes the accounts, recent posts and how they did to `appeeky/social/`; `check` checks the drafts in `appeeky/social/drafts/`; `push` sends them. Needs `APPEEKY_API_KEY`. |
+| `ugc pull\|generate` | UGC from your Appeeky creator personas: `pull` writes the personas and their clips to `appeeky/ugc/`; `generate` makes a clip from each brief in `appeeky/ugc/briefs/` (`--dry-run` shows the cost in media credits). Needs `APPEEKY_API_KEY`. |
+| `agents install` | Write the specialist subagents and the `/appeeky-cofounder` review into `.claude/` (`--for opencode` or `all` for `.opencode/`). Files you changed are kept unless `--force`. |
 
 Global options: `--json` for machine-readable output, `--cwd <dir>`, `--via auto|local|hosted`.
 
@@ -183,7 +236,7 @@ competitors:
 
 `competitors pull` writes `appeeky/competitors/calm-night.yaml`: title, rating, version and release notes, the first part of the description, the 25 searches it ranks best for in your first targets country, where it ranks for your own targets, and its recent low ratings. Each pull compares with the last one and adds what changed to `appeeky/competitors/changes.md`: a new title, a new version and its notes, a rewritten description, a climb into the top 10 for one of your targets. `status` warns a release being measured when a competitor changed something inside its window.
 
-**A weekly proposal.** An agent can propose one listing change a week as a pull request, for a store with no release still being measured: `status --json` lists those stores as `free`, so a new change never mixes with an open one. [`examples/weekly/`](examples/weekly) has a GitHub Actions workflow, the prompt it gives the agent, and the same thing as a script for cron on a machine of your own. The agent reads `loops.md`, the playbook, competitor changes, reviews and your numbers, edits the listing, runs `check` and `diff`, and writes why in the pull request. Nothing reaches the stores until someone merges it.
+**A weekly co-founder review.** Once a week the specialist subagents read the repo, and an agent writes a brief and proposes one listing change as a pull request, for a store with no release still being measured: `status --json` lists those stores as `free`, so a new change never mixes with an open one. See [Specialists and the co-founder review](#specialists-and-the-co-founder-review). [`examples/weekly/`](examples/weekly) has a GitHub Actions workflow and the same thing as a script for cron on a machine of your own. Nothing reaches the stores until someone merges it.
 
 **Data.** `data pull` writes CSV files per source, merged by date on every pull, with a `README.md` index:
 
@@ -215,6 +268,55 @@ jobs:
       - run: git add appeeky && git commit -m "Daily category, AI visibility, reviews, competitors and verify" && git push || true
 ```
 
+## Social media and UGC
+
+With the social accounts and creator personas you set up in Appeeky, posts and videos go through the repo like listing changes: drafted, reviewed in a pull request, sent after the merge.
+
+```
+appeeky/social/accounts.yaml        connected accounts (platform, name, id)
+appeeky/social/posts.jsonl          recent posts and each platform's result: views, likes, comments, shares
+appeeky/social/summary.md           the last 30 days per platform, and what did best
+appeeky/social/drafts/<name>.yaml   a post to send: accounts, text, when, media, why
+appeeky/ugc/personas.yaml           creator personas, and whether each can make clips yet
+appeeky/ugc/clips.jsonl             the clips made with them
+appeeky/ugc/briefs/<name>.yaml      a video to make: persona, script, scene, caption, why
+appeeky/ugc/personas/<name>.yaml    optional: a persona kept in the repo, with its look images, for --local
+```
+
+```yaml
+# appeeky/social/drafts/2026-11-10-fan-sounds.yaml
+accounts: [twitter, instagram]       # platforms from accounts.yaml, or account ids
+text: "Fan sounds are here. Pick a fan, set a timer, sleep."
+when: "2026-11-12T16:00:00Z"          # without it, the post goes out when it is sent
+media: ["https://…/fan.mp4"]          # Instagram, TikTok and Pinterest need one
+why: "Users asked for fan sounds in 9 reviews; it shipped in 3.2."
+```
+
+`social check` flags drafts that would fail: a platform with no connected account, text over the platform's limit, a missing image, a time in the past. `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
+
+### Clips on your own fal key
+
+`ugc generate --local` makes the clips where Spec runs, with your own [fal](https://fal.ai) key, instead of in Appeeky with media credits. It is the same pipeline as Appeeky UGC (a still of the persona in the scene, then a talking video with the script in their voice) and fal bills your account directly.
+
+```bash
+export FAL_KEY=…                         # fal.ai → API keys
+appeeky-spec ugc generate --local --dry-run   # what each brief costs on fal, in USD
+appeeky-spec ugc generate --local             # asks first, then renders
+```
+
+The persona is either one from Appeeky (its cover image is the look, needs `APPEEKY_API_KEY`) or one kept in the repo:
+
+```yaml
+# appeeky/ugc/personas/mia.yaml
+name: Mia
+appearance: early 20s, dyed pink bob, oversized hoodie
+personality: playful, talks fast
+lane: dance trends and sound edits
+looks: [mia/front.png, mia/side.png]     # images next to this file, or URLs
+```
+
+The clip is saved to `.appeeky/media/<brief>.mp4` (gitignored) and the brief records `clipFile`, fal's `videoUrl` (use it in a social draft's `media:`) and `costUsd`. With `FAL_KEY` set as a secret, the push workflow and the docker `push` routine render locally too.
+
 ## AI visibility
 
 People ask ChatGPT, Claude, Gemini and Perplexity for apps, not only the store. Appeeky AI Visibility asks them on a schedule, per storefront, and records whether they name your app. The questions live in the spec: an **intent** is what someone wants, its **prompts** are how they ask.
@@ -236,6 +338,79 @@ aiVisibility:
 - `visibility scan` asks the assistants now instead of waiting for the schedule. It uses AI Visibility credits.
 
 `verify` reads the daily series as `ai_visibility`, the share of answers that name the app, before and after a push. A description that says what the app is for in the words people use can move it, and so can the pages the assistants cite.
+
+### On your own keys
+
+The same scan runs where Spec runs, on your own model accounts, with no Appeeky account. Set any of `OPENAI_API_KEY` (ChatGPT), `ANTHROPIC_API_KEY` (Claude), `GEMINI_API_KEY` (Gemini) and `PERPLEXITY_API_KEY` (Perplexity); each key adds that assistant.
+
+```bash
+npx @appeeky/spec visibility init --local          # intents and prompts from your listing, written into the spec
+npx @appeeky/spec visibility scan --local --dry-run
+# US  6 intents · 24 prompts × chatgpt, claude, gemini, perplexity · about $2.45
+npx @appeeky/spec visibility scan --local
+```
+
+Each prompt goes to each assistant with web search on, the way the apps answer people, and a second cheap call lists the apps each answer names. The result is the same `appeeky/visibility/<country>.yaml`, plus `history.csv` (one row per scan, intent and assistant, read by `verify`) and `answers/<country>.jsonl` with every answer. Add `aliases:` under `aiVisibility` for other names the assistants use for the app.
+
+On a schedule: set `VISIBILITY_EVERY` (days, e.g. `7`) as a repository variable or in the docker `.env`, with the keys as secrets, and the daily routine scans when it is due.
+
+## Apple Search Ads on your own key
+
+Without an Appeeky account, read Search Ads straight from Apple. In Apple Search Ads → Account Settings → API, invite an API user with a read role and upload its public key. Then save the key on the same App Store Connect CLI account that holds your App Store Connect key, so both live in one place and the private key never leaves the CLI:
+
+```bash
+appstore accounts search-ads my-team --client-id SEARCHADS.… --team-id SEARCHADS.… --key-id … --private-key-path ./searchads-private-key.pem
+npx @appeeky/spec search-ads pull
+# ✓ appeeky/search-ads/  US Exact, Discovery
+#   30 days: 412.80 EUR · 236 installs · 1.75 EUR each · 980 taps
+```
+
+```yaml
+stores:
+  appStore:
+    appId: "1234567890"
+    searchAds:
+      orgId: "1234567"        # only when the key reaches more than one organization
+      campaigns: ["987654"]   # optional: only these campaigns
+```
+
+The spec uses `stores.appStore.account` (or the CLI's default account). In CI, where there is no CLI account, set `ASA_CLIENT_ID`, `ASA_TEAM_ID`, `ASA_KEY_ID` and `ASA_PRIVATE_KEY` (the PEM or its path) instead; they win over the account.
+
+Only the campaigns for `stores.appStore.appId` are read. It writes `daily.csv` (spend, installs, taps and impressions per day, kept across pulls), `keywords.csv`, `search-terms.csv` and `summary.md`. The summary lists the search terms that brought installs and are not targets yet, which you can rank for organically for free, and the keywords that spent and brought nothing. `ads` and `verify` read `ad_installs` and `cpa` from it, so no Appeeky connection is needed. The daily routines pull it when `ASA_CLIENT_ID` is set.
+
+## Website: SEO and AI readiness
+
+People also find an app through its website, in Google and in the pages AI assistants cite. Point the spec at it:
+
+```yaml
+web:
+  url: https://sleepsounds.app/
+  searchConsole: sc-domain:sleepsounds.app   # optional, this is the default
+```
+
+- `seo check` reads the site the way a crawler does, with no key. **Search**: HTTPS, title, description, canonical, language, one h1, Open Graph, noindex, robots.txt and the sitemap. **The app**: store links, the Smart App Banner, `MobileApplication` structured data, the app's name in the text. **AI assistants**: whether robots.txt lets GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, PerplexityBot, Google-Extended and Applebot-Extended in, llms.txt, how many words are readable without JavaScript, the target keywords on the page and an FAQ. Each finding comes with the fix; it exits 1 when something fails.
+- `seo llms --out public/llms.txt` writes llms.txt from the listing: what the app is, where to get it, what it is good for and the description.
+- `seo pull` reads Google Search Console with your own service account. Create one in Google Cloud, enable the Search Console API, add its email as a user of the property, and set `GSC_CREDENTIALS` to the JSON key (or its path). On your own machine, a `gcloud auth application-default login` with the `webmasters.readonly` scope works too. It writes `appeeky/seo/daily.csv` (clicks and impressions per day, kept across pulls), `queries.csv`, `pages.csv` and `summary.md` with the trend, the top queries, the queries close to the top (position 4–15) and the ones with your store targets.
+
+`verify` reads `search_clicks` and `search_impressions` from `daily.csv`, so a listing change that also changes the website's copy is measured in Google too. The daily workflow runs `seo pull` when the `GSC_CREDENTIALS` secret is set.
+
+### Google ranks and keyword data on DataForSEO
+
+With your own [DataForSEO](https://dataforseo.com) account (`DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD` from API access), the spec reads Google itself. The keywords are `web.keywords.<country>`, or the store targets of the first storefront:
+
+```yaml
+web:
+  url: https://sleepsounds.app/
+  keywords:
+    us: [rain sounds, white noise app, sleep sounds for baby]
+  device: mobile        # default; desktop reads the desktop results page
+```
+
+- `seo ranks` reads the results page for each keyword (about $0.02 each). It records where the site ranks, where the app's App Store or Google Play page ranks on Google, and whether Google's AI Overview shows and cites the site, to `appeeky/seo/ranks.csv` (one row per keyword per check) and `ranks.md`. Keywords that enter or leave the top 10, and AI Overview citations gained or lost, go to `appeeky/seo/changes.md`.
+- `seo keywords` writes search volume, difficulty, CPC and intent for the keywords, plus related ideas, to `appeeky/seo/keywords.csv`.
+- `seo domain` writes what the site ranks for, its estimated visits and the sites that rank for the same searches to `appeeky/seo/domain.md` and `ranked-keywords.csv`.
+
+Each one quotes with `--dry-run` and asks before spending (`--yes` skips the question). `verify` reads `web_rank` (the site's average position, 101 when not ranked) and `ai_overview_citations` from `ranks.csv`. The daily routines run `seo ranks --every 7` when `DATAFORSEO_LOGIN` is set (`SEO_RANKS_EVERY` changes the days); the weekly agent cannot run the paid ones.
 
 ## Category rank
 
@@ -350,7 +525,7 @@ docker run --rm --env-file app.env ghcr.io/appeeky/appeeky-spec daily
 | --- | --- | --- |
 | `daily` | once a day | `category pull`, `visibility pull`, `verify --playbook`, `reviews pull`, `competitors pull`, then commits |
 | `push` | every 10–15 minutes | pushes listing changes merged to `main` and commits the release. It remembers the last commit it handled as the `appeeky-spec/pushed` tag. The first run only sets the tag, so it never pushes what was on `main` before. A run that fails leaves the tag, so the next run tries again. |
-| `weekly` | once a week | the weekly proposal: an agent opens a pull request with one listing change. Use the `latest-agent` image (adds Claude Code and `gh`), set `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` on your computer: it uses your Claude Pro or Max plan) or `ANTHROPIC_API_KEY`, and copy [`examples/weekly/propose.md`](examples/weekly/propose.md) to `.github/appeeky-propose.md`. |
+| `weekly` | once a week | the co-founder review: the specialists read the repo, an agent writes a brief and opens a pull request with one listing change. Use the `latest-agent` image (adds Claude Code and `gh`), set `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` on your computer: it uses your Claude Pro or Max plan) or `ANTHROPIC_API_KEY`, and commit the files `agents install` writes (or your own `.github/appeeky-propose.md`). |
 
 `PUSH_DRY_RUN=1` shows what `push` would change without changing anything: a safe first run. `GITHUB_TOKEN` needs contents write on the repo (and pull requests write for `weekly`); it is passed to git through a credential helper, never in a URL. Pull request comments still need GitHub: keep the action above for those. To build the image yourself: `docker build -f docker/Dockerfile -t appeeky-spec .` (`--build-arg AGENT=1` for the agent).
 
@@ -384,6 +559,28 @@ npx skills add appeeky/appeeky-spec
 
 Full documentation: [docs.appeeky.com/docs/spec](https://docs.appeeky.com/docs/spec).
 
+## Specialists and the co-founder review
+
+Appeeky Spec ships six specialist subagents and a review that runs them, so your coding agent can work like a small growth team:
+
+| Specialist | Reads | Returns |
+| --- | --- | --- |
+| `appeeky-aso` | coverage, ranks, competitors, AI visibility, the category chart | missing targets, spare keyword space, up to two listing changes with character counts |
+| `appeeky-reviews` | reviews and their summary, competitors' low ratings, revenue data | what users ask for, a listing change that answers it, replies to draft |
+| `appeeky-ads` | Apple Search Ads, Meta, TikTok and attribution data | paid searches worth targeting, and spend findings for a person |
+| `appeeky-releases` | releases and their day-7 and day-14 checks, `loops.md`, the app's git history | what won and lost, what waits for a new version, What's New text |
+| `appeeky-ugc` | UGC experiments, smart link and attribution results, personas, review words | which creators and hooks worked, the next UGC experiment with a brief for the creator |
+| `appeeky-social` | what shipped and won, What's New, review words, the channels that bring installs | posts to publish, drafted per channel, with the link to use |
+
+The specialists only read. The **co-founder review** (`/appeeky-cofounder`) is the one that acts: it checks which stores are free, starts the six specialists in parallel, picks the single change with the strongest evidence, edits and checks it, and writes a brief to `appeeky/briefs/<date>.md` with what each specialist found, the change, what is for a person (review replies, ads, product requests, the next UGC experiment, posts to publish) and what it did not pick. It turns the social specialist's posts into drafts in `appeeky/social/drafts/` and the UGC specialist's next video into a brief in `appeeky/ugc/briefs/`, so they go out after the same merge. Then it writes the pull request. It never pushes, posts or spends credits itself: the weekly routines deny those commands to the agent.
+
+```bash
+npx @appeeky/spec agents install                  # .claude/agents/appeeky-*.md and .claude/commands/appeeky-cofounder.md
+npx @appeeky/spec agents install --for opencode   # .opencode/agent/ and .opencode/command/
+```
+
+Commit them. In Claude Code, run `/appeeky-cofounder`; in agents without subagents, the review does the specialists' checklists itself. The weekly routines (GitHub Actions, cron, docker `WEEKLY_AT`) run the same review on a schedule. Edit the files to fit your app: `agents install` keeps your changes.
+
 ## Library
 
 The same logic is available as a library. `@appeeky/spec/core` has no Node dependencies and runs in the browser (editors, previews):
@@ -406,6 +603,8 @@ npm test
 npm run build
 node dist/bin.js --help
 ```
+
+The UGC and AI visibility pipelines ship as minified bundles in `vendor/`. `npm run vendor:ugc` and `npm run vendor:visibility` rebuild them from the Appeeky repo next to this one; commit the result.
 
 ### Releases
 
@@ -431,7 +630,7 @@ It then:
 
 Appeeky Spec is licensed under the [Functional Source License, Version 1.1, MIT Future License](./LICENSE) (FSL-1.1-MIT).
 
-You can use, change and run it for your own apps and inside your company, including commercially. What it does not allow is offering it, or a product built from it, as a competing product or service. Each release becomes MIT two years after it ships.
+You can use, change and run it for your own apps and inside your company, including commercially. What it does not allow is offering it, or a product built from it, as a competing product or service.
 
 ---
 

@@ -5,10 +5,18 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command, Option } from "commander";
 import { adsSnapshot, CHANNEL_LABELS, saveAdsSnapshot } from "./ads.js";
+import { COFOUNDER_COMMAND, installAgents, parseTargets, TARGET_DIRS, type InstalledFile } from "./agents.js";
 import { attributionClient, attributionClients, attributionMetricSource, createExperimentLink, hasClients, IOS_LINK_NOTE, iosOnlyLink, isClient, linkResult, linkStore } from "./attribution.js";
 import { pullCompetitors, similarApps } from "./competitors.js";
+import { draftIssues, fetchSocial, readAccounts, readDrafts, resolveAccounts, saveSocial, sendDraft } from "./social.js";
+import { fetchUgc, findPersona, generateBrief, quoteBrief, readBriefs, readPersonas, saveUgc } from "./ugc.js";
+import { generateLocal, loadCore, planLocalClip, readAppeekyPersona, readLocalPersona, type LocalPersona } from "./ugc-local.js";
 import { categoryFile, categoryMetricSource, categoryPlans, chartSources, previousRank, readCategoryHistory, readCategoryRanks, saveCategoryRanks } from "./category.js";
 import { applySync, bootstrapIntents, languageFor, planSync, pullVisibility, readRemoteIntents, scanVisibility, visibilityMetricSource, visibilityTarget } from "./visibility.js";
+import { appContext, daysSinceLocalScan, KEY_NAMES, type LocalScanPlan, loadVisibilityCore, localVisibilityMetricSource, planLocalScan, scanLocal } from "./visibility-local.js";
+import { pullSearchAds, SearchAdsClient, searchAdsMetricSource, searchAdsSource } from "./search-ads.js";
+import { daysSinceRanks, pullDomain, pullKeywords, pullRanks, quoteSeo, readDataForSeo, webKeywords, webRankMetricSource } from "./dataforseo.js";
+import { checkSite, llmsTxt, pullSearchConsole, readServiceAccount, searchConsoleProperty, seoMetricSource, type SiteCheck } from "./seo.js";
 import { attributionBlock, initHosted, initSelfHosted, nextSteps, specStores } from "./attribution-setup.js";
 import { pullData } from "./data.js";
 import { combineSources } from "./metrics.js";
@@ -17,7 +25,7 @@ import { AppeekyApi, appeekyRankSource, loadPopularity, metricSourceFor } from "
 import { closeExperiment, dueExperiments, experimentId, readExperiments, writeExperiment, type Experiment } from "./experiments.js";
 import { appendPlaybook, experimentApp, measureExperiments, playbookLine, verifyReleases } from "./measure.js";
 import { formatChange, isMetricName, METRICS, metricAfter, metricBefore, type MetricName } from "./metrics.js";
-import { loadProjectAtRef, specReport } from "./report.js";
+import { loadProjectAtRef, outboxReport, specReport } from "./report.js";
 import { checkScreenshots, pullScreenshots } from "./screenshots.js";
 import { appendKeyword, crossLocalizationSuggestions, keywordSuggestions } from "./suggest.js";
 import { firstRankSource, itunesRankSource, rankAppIds, snapshotRanks, type RankSource } from "./verify.js";
@@ -286,6 +294,10 @@ export function buildProgram(): Command {
       const result = spawnSync("npx", ["-y", "skills", "add", "appeeky/appeeky-spec"], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
       if (result.status !== 0) console.log(c.yellow("  The skills did not install. Run `npx skills add appeeky/appeeky-spec` later."));
     }
+    if (await agree(`Add the specialist agents and the /${COFOUNDER_COMMAND} review for Claude Code?`)) {
+      printInstalled(await installAgents(root, ["claude"]));
+      console.log(c.dim(`  In Claude Code, run /${COFOUNDER_COMMAND} for a growth review. Other agents: \`appeeky-spec agents install --for opencode\`.`));
+    }
 
     step(6, "Where you stand");
     if (pulled && targets.length) await program.parseAsync(["coverage", "--country", country], { from: "user" });
@@ -330,6 +342,28 @@ export function buildProgram(): Command {
       if (x.fix) console.log(`    ${c.dim(x.fix)}`);
     }
   }
+
+  function printInstalled(files: InstalledFile[]) {
+    const mark = { written: c.green("✓"), unchanged: c.dim("="), kept: c.yellow("!") } as const;
+    for (const f of files) console.log(`  ${mark[f.status]} ${f.path}${f.status === "kept" ? c.dim("  (yours differs: kept, --force to replace)") : ""}`);
+  }
+
+  const agents = program.command("agents").description("Specialist subagents (ASO, reviews, ads, releases, UGC, social) and the co-founder review, for your coding agent");
+  agents
+    .command("install")
+    .description(`Write the specialists and the /${COFOUNDER_COMMAND} command into this repo (${Object.values(TARGET_DIRS).map((d) => d.agents).join(", ")})`)
+    .option("--for <targets>", "claude, opencode or all, comma separated", "claude")
+    .option("--force", "Replace files you changed", false)
+    .action(async (opts: { for: string; force: boolean }) => {
+      const root = resolve(g().cwd);
+      const files = await installAgents(root, parseTargets(opts.for), { force: opts.force });
+      if (g().json) {
+        printJson({ root, files });
+        return;
+      }
+      printInstalled(files);
+      console.log(c.dim(`Commit them. Then run /${COFOUNDER_COMMAND} in your agent, or schedule it (examples/weekly/).`));
+    });
 
   program
     .command("doctor")
@@ -560,14 +594,15 @@ export function buildProgram(): Command {
 
   program
     .command("ads")
-    .description("Spend and installs of your paid channels: Apple Search Ads, plus the Meta and TikTok campaigns under ads: (needs APPEEKY_API_KEY)")
+    .description("Spend and installs of your paid channels: Apple Search Ads (from Appeeky, or appeeky/search-ads/ pulled with your own key), plus the Meta and TikTok campaigns under ads: (needs APPEEKY_API_KEY)")
     .option("--days <n>", "How many days, up to yesterday", "30")
     .option("--save", "Write the numbers to appeeky/ads/<date>.yaml", false)
     .action(async (opts: { days: string; save: boolean }) => {
       const project = await load();
       const a = api();
-      if (!a) throw new Error("Set APPEEKY_API_KEY: ad data comes from the channels you connected in Appeeky.");
-      const snapshot = await adsSnapshot(a, project.spec, experimentApp(project, {}), Number(opts.days) || 30);
+      const own = searchAdsMetricSource(project.root);
+      if (!a && !own) throw new Error("Set APPEEKY_API_KEY (ad data from the channels you connected in Appeeky), or pull Apple Search Ads with your own key: appeeky-spec search-ads pull.");
+      const snapshot = await adsSnapshot(a ?? null, project.spec, experimentApp(project, {}), Number(opts.days) || 30, new Date(), own);
       const saved = opts.save ? await saveAdsSnapshot(project.root, snapshot) : undefined;
       if (g().json) {
         printJson({ ...snapshot, ...(saved ? { saved } : {}) });
@@ -710,6 +745,182 @@ export function buildProgram(): Command {
       for (const f of failed) console.log(`${c.red(f.id)} ${c.dim(f.message)}`);
     });
 
+  const social = program.command("social").description("Organic social media in the repo: accounts, posts and their results, and posts sent through a pull request (needs APPEEKY_API_KEY)");
+  social
+    .command("pull")
+    .description("Write the connected accounts, recent posts and their analytics to appeeky/social/, and summary.md")
+    .option("--limit <n>", "How many recent posts", "100")
+    .action(async (opts: { limit: string }) => {
+      const project = await load();
+      const a = api();
+      if (!a) throw new Error("Set APPEEKY_API_KEY: posts come from the social accounts connected in Appeeky.");
+      const data = await fetchSocial(a, { limit: Number(opts.limit) || 100 });
+      await saveSocial(project.root, data);
+      if (g().json) {
+        printJson({ accounts: data.accounts.length, posts: data.posts.length });
+        return;
+      }
+      console.log(`${c.bold("Accounts")} ${data.accounts.map((x) => `${x.platform} (${x.name})`).join(", ") || c.dim("none connected")}`);
+      console.log(`${c.bold("Posts")}    ${data.posts.length} · ${data.posts.filter((p) => p.platforms.some((x) => x.publishedAt)).length} published`);
+      console.log(c.dim("Written to appeeky/social/: accounts.yaml, posts.jsonl, summary.md."));
+    });
+
+  social
+    .command("check")
+    .description("Check the drafts in appeeky/social/drafts/: connected accounts, length, media, time")
+    .action(async () => {
+      const project = await load();
+      const accounts = await readAccounts(project.root);
+      const drafts = (await readDrafts(project.root)).filter((d) => d.status === "draft");
+      const results = drafts.map((d) => ({ file: d.file.replace(project.root + "/", ""), issues: draftIssues(d, accounts) }));
+      if (g().json) printJson({ drafts: results });
+      else if (!results.length) console.log(c.dim("No drafts in appeeky/social/drafts/."));
+      else for (const r of results) console.log(`${r.issues.length ? c.red("✗") : c.green("✓")} ${r.file}${r.issues.length ? `\n  ${c.dim(r.issues.join("; "))}` : ""}`);
+      if (results.some((r) => r.issues.length)) process.exitCode = 1;
+    });
+
+  social
+    .command("push")
+    .description("Send the drafts in appeeky/social/drafts/: each goes out now, or at its `when`")
+    .option("--yes", "Send without asking", false)
+    .action(async (opts: { yes: boolean }) => {
+      const project = await load();
+      const a = api();
+      if (!a) throw new Error("Set APPEEKY_API_KEY: posts go out through the social accounts connected in Appeeky.");
+      const accounts = await readAccounts(project.root);
+      const drafts = (await readDrafts(project.root)).filter((d) => d.status === "draft");
+      const blocked = drafts.filter((d) => draftIssues(d, accounts).length);
+      if (blocked.length) throw new Error(`Fix first (appeeky-spec social check): ${blocked.map((d) => `${d.file.replace(project.root + "/", "")} (${draftIssues(d, accounts).join("; ")})`).join("; ")}`);
+      if (drafts.length === 0) {
+        if (g().json) printJson({ sent: [] });
+        else console.log(c.dim("No drafts to send."));
+        return;
+      }
+      if (!g().json)
+        for (const d of drafts) {
+          const to = resolveAccounts(d, accounts).accounts.map((x) => `${x.platform} (${x.name})`).join(", ");
+          console.log(`${c.bold(d.file.replace(project.root + "/", ""))} ${c.dim(`→ ${to}, ${d.when ? `at ${d.when}` : "now"}`)}\n  ${d.text}`);
+        }
+      if (!opts.yes && !(await confirm(`Publish ${drafts.length} post${drafts.length === 1 ? "" : "s"}? They go out on the accounts above.`))) return;
+      const sent: Array<{ file: string; postId: string }> = [];
+      const failed: Array<{ file: string; message: string }> = [];
+      for (const d of drafts) {
+        const file = d.file.replace(project.root + "/", "");
+        try {
+          sent.push({ file, postId: await sendDraft(a, d, accounts) });
+        } catch (e) {
+          failed.push({ file, message: (e as Error).message });
+        }
+      }
+      if (g().json) printJson({ sent, failed });
+      else {
+        console.log(c.green(`Sent ${sent.length}.`));
+        for (const f of failed) console.log(`${c.red(f.file)} ${c.dim(f.message)}`);
+      }
+      if (failed.length) process.exitCode = 1;
+    });
+
+  const ugc = program.command("ugc").description("UGC from your Appeeky creator personas: clips in the repo, and videos made from briefs (needs APPEEKY_API_KEY)");
+  ugc
+    .command("pull")
+    .description("Write your creator personas and their clips to appeeky/ugc/")
+    .option("--limit <n>", "How many recent clips", "100")
+    .action(async (opts: { limit: string }) => {
+      const project = await load();
+      const a = api();
+      if (!a) throw new Error("Set APPEEKY_API_KEY: personas and clips come from Appeeky UGC.");
+      const data = await fetchUgc(a, { limit: Number(opts.limit) || 100 });
+      await saveUgc(project.root, data);
+      if (g().json) {
+        printJson({ personas: data.personas.length, clips: data.clips.length });
+        return;
+      }
+      console.log(`${c.bold("Personas")} ${data.personas.map((p) => `${p.name}${p.ready ? "" : c.dim(" (no look yet)")}`).join(", ") || c.dim("none yet: create one in Appeeky (UGC)")}`);
+      console.log(`${c.bold("Clips")}    ${data.clips.length}`);
+      console.log(c.dim("Written to appeeky/ugc/: personas.yaml, clips.jsonl."));
+    });
+
+  ugc
+    .command("generate")
+    .description("Make a clip from each draft brief in appeeky/ugc/briefs/ (uses Appeeky media credits, or your own fal key with --local)")
+    .option("--dry-run", "Only show what each clip would cost", false)
+    .option("--yes", "Generate without asking", false)
+    .option("--local", "Render here with your own FAL_KEY (fal bills you; no Appeeky credits)", false)
+    .action(async (opts: { dryRun: boolean; yes: boolean; local: boolean }) => {
+      const project = await load();
+      if (opts.local) return generateLocalClips(project.root, opts);
+      const a = api();
+      if (!a) throw new Error("Set APPEEKY_API_KEY: clips are made with Appeeky UGC.");
+      const personas = await readPersonas(project.root);
+      const briefs = (await readBriefs(project.root)).filter((b) => b.status === "draft");
+      const unknown = briefs.filter((b) => !findPersona(b, personas));
+      if (unknown.length) throw new Error(`Unknown persona (run \`appeeky-spec ugc pull\`): ${unknown.map((b) => `${b.persona} in ${b.file.replace(project.root + "/", "")}`).join("; ")}`);
+      const notReady = briefs.filter((b) => findPersona(b, personas)!.ready === false);
+      if (notReady.length) throw new Error(`Pick a look (reference images) in Appeeky UGC first for: ${[...new Set(notReady.map((b) => b.persona))].join(", ")}`);
+      if (briefs.length === 0) {
+        if (g().json) printJson({ briefs: [] });
+        else console.log(c.dim("No draft briefs in appeeky/ugc/briefs/."));
+        return;
+      }
+      const quotes = [];
+      for (const b of briefs) quotes.push({ file: b.file.replace(project.root + "/", ""), persona: b.persona, ...(await quoteBrief(a, b, findPersona(b, personas)!)) });
+      const credits = quotes.reduce((n, q) => n + q.credits, 0);
+      if (!g().json) for (const q of quotes) console.log(`${c.bold(q.file)} ${c.dim(`${q.persona} · ${q.credits} credits${q.affordable ? "" : " · not enough credits"}`)}`);
+      if (opts.dryRun) {
+        if (g().json) printJson({ dryRun: true, briefs: quotes, credits });
+        else console.log(c.dim(`\n${credits} credits in all. Nothing was made.`));
+        return;
+      }
+      if (quotes.some((q) => !q.affordable)) throw new Error("Not enough media credits for every brief. Top up in Appeeky, or remove a brief.");
+      if (!opts.yes && !(await confirm(`Make ${briefs.length} clip${briefs.length === 1 ? "" : "s"} for ${credits} credits?`))) return;
+      const made = [];
+      for (const b of briefs) made.push({ file: b.file.replace(project.root + "/", ""), ...(await generateBrief(a, b, findPersona(b, personas)!)) });
+      if (g().json) printJson({ made, credits });
+      else console.log(c.green(`Started ${made.length}. They render in Appeeky; \`appeeky-spec ugc pull\` records them when done.`));
+    });
+
+  async function generateLocalClips(root: string, opts: { dryRun: boolean; yes: boolean }) {
+    const falKey = process.env.FAL_KEY?.trim();
+    if (!falKey && !opts.dryRun) throw new Error("Set FAL_KEY (fal.ai → API keys): local clips are billed to your fal account.");
+    const briefs = (await readBriefs(root)).filter((b) => b.status === "draft");
+    if (briefs.length === 0) {
+      if (g().json) printJson({ briefs: [] });
+      else console.log(c.dim("No draft briefs in appeeky/ugc/briefs/."));
+      return;
+    }
+    const core = await loadCore();
+    const a = api();
+    const personas = new Map<string, LocalPersona>();
+    for (const b of briefs) {
+      if (personas.has(b.persona)) continue;
+      const p = (await readLocalPersona(root, b.persona)) ?? (a ? await readAppeekyPersona(a, b.persona) : undefined);
+      if (!p) throw new Error(`Unknown persona ${b.persona}: add appeeky/ugc/personas/${b.persona.toLowerCase()}.yaml with its looks${a ? "" : ", or set APPEEKY_API_KEY to use one from Appeeky"}.`);
+      personas.set(b.persona, p);
+    }
+    const rel = (f: string) => f.replace(root + "/", "");
+    const quotes = briefs.map((b) => {
+      const plan = planLocalClip(core, personas.get(b.persona)!, b, []);
+      return { file: rel(b.file), persona: b.persona, ...plan.clip, costUsd: plan.costUsd };
+    });
+    const total = Math.round(quotes.reduce((n, q) => n + q.costUsd, 0) * 100) / 100;
+    if (!g().json) for (const q of quotes) console.log(`${c.bold(q.file)} ${c.dim(`${q.persona} · ${q.durationSec}s ${q.aspectRatio} · ${q.videoModelId} · about $${q.costUsd.toFixed(2)} on fal`)}`);
+    if (opts.dryRun) {
+      if (g().json) printJson({ dryRun: true, local: true, briefs: quotes, costUsd: total });
+      else console.log(c.dim(`\nAbout $${total.toFixed(2)} on your fal account in all. Nothing was made.`));
+      return;
+    }
+    if (!opts.yes && !(await confirm(`Make ${briefs.length} clip${briefs.length === 1 ? "" : "s"} on fal for about $${total.toFixed(2)}?`))) return;
+    const made = [];
+    for (const b of briefs) {
+      if (!g().json) console.log(c.bold(rel(b.file)));
+      const r = await generateLocal(core, root, b, personas.get(b.persona)!, falKey!, { log: (l) => !g().json && console.log(c.dim(`  ${l}`)) });
+      made.push({ file: rel(b.file), clip: rel(r.file), videoUrl: r.videoUrl, costUsd: r.costUsd });
+      if (!g().json) console.log(`  ${c.green("✓")} ${rel(r.file)}`);
+    }
+    if (g().json) printJson({ made, costUsd: total });
+    else console.log(c.dim("\nThe clips are in .appeeky/media/ (gitignored); each brief has its videoUrl for a social draft's media:."));
+  }
+
   const competitors = program.command("competitors").description("Competitors in the repo: their listing, ranks and reviews (needs APPEEKY_API_KEY)");
   competitors
     .command("pull")
@@ -764,7 +975,7 @@ export function buildProgram(): Command {
 
   const visibility = program
     .command("visibility")
-    .description("Whether ChatGPT, Claude, Gemini and Perplexity name your app, from Appeeky AI Visibility (needs APPEEKY_API_KEY)");
+    .description("Whether ChatGPT, Claude, Gemini and Perplexity name your app: from Appeeky AI Visibility (APPEEKY_API_KEY), or with --local on your own model keys");
   const needKey = () => {
     const a = api();
     if (!a) throw new Error("Set APPEEKY_API_KEY: AI visibility comes from Appeeky AI Visibility.");
@@ -779,7 +990,9 @@ export function buildProgram(): Command {
     .command("init")
     .description("Write the intents and prompts Appeeky tracks into appeeky.spec.yaml; with none yet, have Appeeky write them from your listing")
     .option("--country <cc>", "Storefront (default: aiVisibility.countries, or the first under targets)")
-    .action(async (opts: { country?: string }) => {
+    .option("--local", `Write them with your own model key (${KEY_NAMES}) instead of Appeeky`, false)
+    .action(async (opts: { country?: string; local: boolean }) => {
+      if (opts.local) return initLocal(opts.country);
       const project = await load();
       const a = needKey();
       const t = watched(project);
@@ -880,9 +1093,14 @@ export function buildProgram(): Command {
 
   visibility
     .command("scan")
-    .description("Ask the assistants now instead of waiting for the schedule (uses AI Visibility credits)")
+    .description("Ask the assistants now: in Appeeky (AI Visibility credits), or with --local on your own model keys")
     .option("--country <cc>", "One storefront only")
-    .action(async (opts: { country?: string }) => {
+    .option("--local", `Ask them from here with your own keys (${KEY_NAMES}) and write appeeky/visibility/`, false)
+    .option("--every <days>", "With --local: skip a storefront scanned in the last <days> days (for a daily schedule)")
+    .option("--dry-run", "With --local: show the prompts, assistants and cost, and ask nothing", false)
+    .option("-y, --yes", "With --local: do not ask before spending", false)
+    .action(async (opts: { country?: string; local: boolean; every?: string; dryRun: boolean; yes: boolean }) => {
+      if (opts.local) return scanLocalCmd(opts);
       const project = await load();
       const a = needKey();
       const t = watched(project);
@@ -893,6 +1111,277 @@ export function buildProgram(): Command {
         return;
       }
       console.log(c.green(`Scan started for ${countries.map((x) => x.toUpperCase()).join(", ")}.`) + c.dim(" Pull the results in a few minutes: appeeky-spec visibility pull"));
+    });
+
+  async function initLocal(country?: string) {
+    const project = await load();
+    const core = await loadVisibilityCore();
+    const helper = core.helperFor(process.env);
+    if (!helper) throw new Error(`Set ${KEY_NAMES}: the intents and prompts are written by your own model.`);
+    const t = visibilityTarget(project);
+    const countries = country ? [country.toLowerCase()] : (t?.countries ?? [Object.keys(project.spec.targets)[0] ?? "us"]);
+    const spec = project.spec;
+    spec.aiVisibility ??= { intents: {} };
+    let cost = 0;
+    const report: Array<{ country: string; intents: number; skipped?: boolean }> = [];
+    for (const cc of countries) {
+      const have = spec.aiVisibility.intents[cc] ?? [];
+      if (have.length) {
+        report.push({ country: cc, intents: have.length, skipped: true });
+        continue;
+      }
+      const r = await core.generateIntents(helper, appContext(project, cc));
+      cost += r.costUsd;
+      spec.aiVisibility.intents[cc] = r.intents;
+      report.push({ country: cc, intents: r.intents.length });
+    }
+    if (country && t && !t.countries.includes(countries[0]!)) spec.aiVisibility.countries = [...t.countries, countries[0]!];
+    if (report.some((r) => !r.skipped && r.intents)) await writeSpec(project.root, spec);
+    if (g().json) {
+      printJson({ model: helper.modelId, costUsd: cost, report });
+      return;
+    }
+    for (const r of report) {
+      if (r.skipped) console.log(c.dim(`${r.country.toUpperCase()}: already has ${r.intents} intents in appeeky.spec.yaml; edit them there.`));
+      else console.log(`${c.green("✓")} ${r.country.toUpperCase()}: wrote ${r.intents} intents to aiVisibility.intents in appeeky.spec.yaml`);
+    }
+    console.log(c.dim(`\n${helper.modelId} on your key, about $${cost.toFixed(3)}. Edit them, then: appeeky-spec visibility scan --local --dry-run`));
+  }
+
+  async function scanLocalCmd(opts: { country?: string; every?: string; dryRun: boolean; yes: boolean }) {
+    const project = await load();
+    const core = await loadVisibilityCore();
+    const t = visibilityTarget(project);
+    const all = Object.keys(project.spec.aiVisibility?.intents ?? {});
+    const countries = opts.country ? [opts.country.toLowerCase()] : (t?.countries ?? all).filter((cc) => all.includes(cc));
+    if (countries.length === 0) throw new Error("No aiVisibility.intents in appeeky.spec.yaml. Write them with appeeky-spec visibility init --local.");
+    const every = opts.every ? Number(opts.every) : 0;
+    const plans: LocalScanPlan[] = [];
+    for (const cc of countries) {
+      const since = every ? await daysSinceLocalScan(project.root, cc) : null;
+      if (since !== null && since < every) {
+        if (!g().json) console.log(c.dim(`${cc.toUpperCase()}: scanned ${since} day${since === 1 ? "" : "s"} ago, next in ${every - since}.`));
+        continue;
+      }
+      plans.push(planLocalScan(core, project, cc, process.env));
+    }
+    if (plans.length === 0) return;
+    if (!plans[0]!.helper || plans[0]!.models.length === 0) throw new Error(`Set ${KEY_NAMES} to scan with your own keys. Each key adds that assistant.`);
+    const total = plans.reduce((n, p) => n + p.quoteUsd, 0);
+    if (!g().json || opts.dryRun) {
+      for (const p of plans) console.log(`${p.country.toUpperCase()}  ${p.intents.length} intents · ${p.prompts} prompts × ${p.models.join(", ")} · about $${p.quoteUsd.toFixed(2)}`);
+      const missing = core.MODELS.filter((m) => !plans[0]!.models.includes(m));
+      if (missing.length) console.log(c.dim(`Not asked (no key): ${missing.join(", ")}.`));
+    }
+    if (opts.dryRun) {
+      if (g().json) printJson({ plans: plans.map(({ helper, ...p }) => ({ ...p, extractor: helper?.modelId })), totalUsd: total });
+      else console.log(c.dim(`About $${total.toFixed(2)} on your own keys in all. Nothing was asked.`));
+      return;
+    }
+    if (!opts.yes && !(await confirm(`Ask the assistants for about $${total.toFixed(2)} on your own keys?`))) return;
+    const results = [];
+    for (const p of plans) {
+      const r = await scanLocal(core, project, p, process.env, { log: g().json ? undefined : (l) => console.log(c.dim(`  ${p.country.toUpperCase()} ${l}`)) });
+      results.push(r);
+    }
+    if (g().json) {
+      printJson(results.map(({ data, ...r }) => ({ ...r, summary: data.summary })));
+      return;
+    }
+    for (const r of results) {
+      const s = r.data.summary;
+      console.log(`${c.green("✓")} ${r.file.replace(project.root + "/", "")}  ${c.green(`${s.winning} named`)} · ${c.yellow(`${s.weak} weak`)} · ${c.red(`${s.missing} missing`)}  ${c.dim(`$${r.costUsd.toFixed(2)}`)}`);
+      for (const i of r.data.intents.filter((x) => x.status === "missing").slice(0, 3)) console.log(`  ${c.red("missing")} "${i.label}"${i.namedInstead ? c.dim(`: they name ${i.namedInstead.slice(0, 3).join(", ")}`) : ""}`);
+      for (const ch of r.changes) console.log(`  ${c.yellow("changed")} ${ch}`);
+      const failedBy = [...new Set(r.failed.map((f) => f.model))];
+      for (const m of failedBy) console.log(`  ${c.red("✗")} ${m}: ${r.failed.find((f) => f.model === m)!.error}`);
+    }
+  }
+
+  const searchAds = program.command("search-ads").description("Apple Search Ads on your own API key: this app's spend, installs, keywords and search terms in appeeky/search-ads/");
+  searchAds
+    .command("pull")
+    .description("Write spend and installs per day, keywords and search terms to appeeky/search-ads/ (the Search Ads key on your appstore CLI account, or ASA_* env)")
+    .option("--days <n>", "How many days, up to yesterday", "30")
+    .action(async (opts: { days: string }) => {
+      const project = await load();
+      const { label, source } = await searchAdsSource(project);
+      let r;
+      try {
+        r = await pullSearchAds(project, new SearchAdsClient(source), new Date(), Number(opts.days) || 30);
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (label.startsWith("appstore") && /no Apple Search Ads key|Could not start|AUTH_ERROR/i.test(msg)) {
+          throw new Error(`${msg}\nSave the Search Ads key on your App Store Connect CLI account (appstore accounts search-ads <account> --client-id … --team-id … --key-id … --private-key-path …), or set ASA_CLIENT_ID, ASA_TEAM_ID, ASA_KEY_ID and ASA_PRIVATE_KEY.`);
+        }
+        throw e;
+      }
+      if (g().json) {
+        printJson(r);
+        return;
+      }
+      const money = (n: number) => `${n.toFixed(2)}${r.currency ? ` ${r.currency}` : ""}`;
+      if (r.campaigns.length === 0) {
+        console.log(c.yellow(`No campaign for App Store id ${project.spec.stores.appStore?.appId} in org ${r.orgId}.`));
+        return;
+      }
+      console.log(`${c.green("✓")} appeeky/search-ads/  ${r.campaigns.map((x) => x.name).join(", ")}`);
+      console.log(`  ${opts.days} days: ${money(r.last30.spend)} · ${r.last30.installs} installs${r.last30.installs ? ` · ${money(r.last30.spend / r.last30.installs)} each` : ""} · ${r.last30.taps} taps`);
+      console.log(c.dim(`  ${r.keywords} keywords, ${r.searchTerms} search terms. Read appeeky/search-ads/summary.md.`));
+      for (const e of r.errors) console.log(`  ${c.yellow("!")} ${e}`);
+    });
+
+  const seo = program.command("seo").description("The app's website in Google and in AI answers: check it, write llms.txt, and pull Search Console with your own service account");
+  const siteUrl = (project: Project, url?: string) => {
+    const u = url ?? project.spec.web?.url;
+    if (!u) throw new Error("Pass the site's URL, or set web.url in appeeky.spec.yaml.");
+    return u;
+  };
+  seo
+    .command("check")
+    .description("Read the site like a crawler: what is missing for search, for the app and for AI assistants")
+    .argument("[url]", "Page to check (default: web.url)")
+    .action(async (url?: string) => {
+      const project = await load();
+      const target = siteUrl(project, url);
+      const checks = await checkSite(project, target);
+      if (g().json) {
+        printJson({ url: target, checks });
+        return;
+      }
+      const titles: Record<SiteCheck["area"], string> = { search: "Search", app: "The app", ai: "AI assistants" };
+      for (const area of ["search", "app", "ai"] as const) {
+        const list = checks.filter((x) => x.area === area);
+        if (!list.length) continue;
+        console.log(c.bold(`\n${titles[area]}`));
+        for (const x of list) {
+          const mark = x.level === "ok" ? c.green("✓") : x.level === "warn" ? c.yellow("!") : c.red("✗");
+          console.log(`  ${mark} ${x.message}${x.fix ? c.dim(`\n      ${x.fix}`) : ""}`);
+        }
+      }
+      const bad = checks.filter((x) => x.level !== "ok").length;
+      console.log(c.dim(`\n${checks.length - bad} of ${checks.length} fine.`));
+      if (checks.some((x) => x.level === "fail")) process.exitCode = 1;
+    });
+  const dfs = () => {
+    const auth = readDataForSeo(process.env);
+    if (!auth) throw new Error("Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD (app.dataforseo.com → API access). DataForSEO bills each call.");
+    return auth;
+  };
+  const quoted = async (project: Project, what: "ranks" | "keywords" | "domain", opts: { dryRun: boolean; yes: boolean }) => {
+    const sets = webKeywords(project);
+    if (what !== "domain" && Object.keys(sets).length === 0) throw new Error("No keywords: add web.keywords.<country> (or targets) to appeeky.spec.yaml.");
+    const usd = quoteSeo(project, what);
+    const n = Object.values(sets).reduce((a, k) => a + k.length, 0);
+    if (!g().json || opts.dryRun) console.log(`${what === "domain" ? `${project.spec.web?.url ?? ""}` : `${n} keywords in ${Object.keys(sets).map((x) => x.toUpperCase()).join(", ")}`} · about $${usd.toFixed(2)} on DataForSEO`);
+    if (opts.dryRun) {
+      if (!g().json) console.log(c.dim("Nothing was asked."));
+      else printJson({ what, keywords: sets, quoteUsd: usd });
+      return false;
+    }
+    return opts.yes || (await confirm(`Spend about $${usd.toFixed(2)} on DataForSEO?`));
+  };
+  seo
+    .command("ranks")
+    .description("Where the site and the app's store page rank on Google for each keyword, and whether the AI Overview cites the site (DataForSEO)")
+    .option("--every <days>", "Skip when the last check is newer than <days> days (for a daily schedule)")
+    .option("--dry-run", "Show the keywords and the cost, ask nothing", false)
+    .option("-y, --yes", "Do not ask before spending", false)
+    .action(async (opts: { every?: string; dryRun: boolean; yes: boolean }) => {
+      const project = await load();
+      const auth = opts.dryRun ? null : dfs();
+      if (opts.every) {
+        const since = await daysSinceRanks(project.root);
+        if (since !== null && since < Number(opts.every)) {
+          if (!g().json) console.log(c.dim(`Checked ${since} day${since === 1 ? "" : "s"} ago; next in ${Number(opts.every) - since}.`));
+          return;
+        }
+      }
+      if (!(await quoted(project, "ranks", opts))) return;
+      const r = await pullRanks(project, auth!);
+      if (g().json) {
+        printJson(r);
+        return;
+      }
+      const ranked = r.ranks.filter((x) => x.position !== null);
+      console.log(`${c.green("✓")} appeeky/seo/ranks.md  ${ranked.length} of ${r.ranks.length} in the top 100 · ${r.ranks.filter((x) => x.position !== null && x.position <= 10).length} in the top 10 · AI Overview cites you ${r.ranks.filter((x) => x.aiCitesYou).length}×  ${c.dim(`$${r.costUsd.toFixed(3)}`)}`);
+      for (const x of r.ranks.slice(0, 10)) {
+        const ai = x.aiOverview ? (x.aiCitesYou ? c.green("AI cites you") : c.dim(`AI cites ${x.aiCited.slice(0, 2).join(", ") || "no one"}`)) : "";
+        console.log(`  ${x.country.toUpperCase()} ${x.keyword.padEnd(28)} site ${String(x.position ?? "—").padEnd(4)} store page ${String(x.storePosition ?? "—").padEnd(4)} ${ai}`);
+      }
+      for (const ch of r.changes) console.log(`  ${c.yellow("changed")} ${ch}`);
+      for (const e of r.errors) console.log(`  ${c.red("✗")} ${e}`);
+    });
+  seo
+    .command("keywords")
+    .description("Search volume, difficulty, CPC and intent for the keywords, and related ideas, into appeeky/seo/keywords.csv (DataForSEO)")
+    .option("--dry-run", "Show the cost, ask nothing", false)
+    .option("-y, --yes", "Do not ask before spending", false)
+    .action(async (opts: { dryRun: boolean; yes: boolean }) => {
+      const project = await load();
+      const auth = opts.dryRun ? null : dfs();
+      if (!(await quoted(project, "keywords", opts))) return;
+      const r = await pullKeywords(project, auth!);
+      if (g().json) {
+        printJson(r);
+        return;
+      }
+      const tracked = r.rows.filter((x) => x.tracked);
+      console.log(`${c.green("✓")} appeeky/seo/keywords.csv  ${tracked.length} keywords, ${r.rows.length - tracked.length} ideas  ${c.dim(`$${r.costUsd.toFixed(3)}`)}`);
+      for (const x of tracked.slice(0, 8)) console.log(`  ${x.keyword.padEnd(30)} ${String(x.volume ?? "—").padStart(7)}/mo  difficulty ${x.difficulty ?? "—"}`);
+      const ideas = r.rows.filter((x) => !x.tracked && (x.volume ?? 0) > 0).slice(0, 5);
+      if (ideas.length) console.log(c.dim(`  ideas: ${ideas.map((x) => `${x.keyword} (${x.volume})`).join(", ")}`));
+    });
+  seo
+    .command("domain")
+    .description("What the site ranks for, its estimated visits and the sites it competes with, into appeeky/seo/domain.md (DataForSEO)")
+    .option("--dry-run", "Show the cost, ask nothing", false)
+    .option("-y, --yes", "Do not ask before spending", false)
+    .action(async (opts: { dryRun: boolean; yes: boolean }) => {
+      const project = await load();
+      const auth = opts.dryRun ? null : dfs();
+      if (!(await quoted(project, "domain", opts))) return;
+      const { report, costUsd } = await pullDomain(project, auth!);
+      if (g().json) {
+        printJson({ ...report, costUsd });
+        return;
+      }
+      console.log(`${c.green("✓")} appeeky/seo/domain.md  ${report.domain} ${report.country.toUpperCase()}: ${report.keywords} keywords · ${report.top10} in the top 10 · ~${report.traffic} visits/mo  ${c.dim(`$${costUsd.toFixed(3)}`)}`);
+      if (report.competitors.length) console.log(c.dim(`  competes with ${report.competitors.slice(0, 5).map((x) => x.domain).join(", ")}`));
+    });
+  seo
+    .command("llms")
+    .description("Write llms.txt from the listing: what the app is, where to get it, and its description")
+    .option("--out <file>", "Write it to a file, e.g. public/llms.txt (default: print it)")
+    .action(async (opts: { out?: string }) => {
+      const project = await load();
+      const text = llmsTxt(project);
+      if (!opts.out) {
+        process.stdout.write(text);
+        return;
+      }
+      const file = resolve(g().cwd, opts.out);
+      await mkdir(resolve(file, ".."), { recursive: true });
+      await writeFile(file, text);
+      if (!g().json) console.log(`${c.green("✓")} ${opts.out}`);
+    });
+  seo
+    .command("pull")
+    .description("Google Search Console clicks, impressions, queries and pages into appeeky/seo/ (needs GSC_CREDENTIALS)")
+    .action(async () => {
+      const project = await load();
+      const sa = await readServiceAccount(process.env, { gcloud: true });
+      if (!sa) throw new Error("Set GSC_CREDENTIALS to a Google service account JSON key (or its path) and add its email as a user of the property in Search Console, or log in on this machine: gcloud auth application-default login --scopes=https://www.googleapis.com/auth/webmasters.readonly,https://www.googleapis.com/auth/cloud-platform");
+      if (!searchConsoleProperty(project)) throw new Error("Set web.url in appeeky.spec.yaml first.");
+      const r = await pullSearchConsole(project, sa);
+      if (g().json) {
+        printJson(r);
+        return;
+      }
+      const pct = (a: number, b: number) => (b > 0 ? c.dim(` (${a >= b ? "+" : ""}${Math.round(((a - b) / b) * 100)}%)`) : "");
+      console.log(`${c.green("✓")} appeeky/seo/  ${r.property}`);
+      console.log(`  last 28 days: ${r.last28.clicks} clicks${pct(r.last28.clicks, r.previous28.clicks)} · ${r.last28.impressions} impressions${pct(r.last28.impressions, r.previous28.impressions)}`);
+      console.log(c.dim(`  ${r.queries} queries, ${r.pages} pages. Read appeeky/seo/summary.md.`));
     });
 
   const category = program.command("category").description("Your rank in the category chart, one row a day in appeeky/category.csv");
@@ -1054,9 +1543,17 @@ export function buildProgram(): Command {
       const a = api();
       const attribution = attributionClients(project.spec, a);
       const visibility = a ? visibilityMetricSource(a, project) : null;
+      const localVisibility = localVisibilityMetricSource(project);
+      const search = seoMetricSource(project.root);
+      const ownAds = searchAdsMetricSource(project.root);
+      const webRank = webRankMetricSource(project.root);
       const metrics = combineSources([
         ...(a ? [metricSourceFor(a, project.spec)] : []),
         ...(visibility ? [visibility] : []),
+        ...(localVisibility ? [localVisibility] : []),
+        ...(search ? [search] : []),
+        ...(ownAds ? [ownAds] : []),
+        ...(webRank ? [webRank] : []),
         categoryMetricSource(project.root),
         reviewMetricSource(project.root),
         ...(hasClients(attribution) ? [attributionMetricSource(attribution)] : []),
@@ -1245,13 +1742,13 @@ export function buildProgram(): Command {
 
   program
     .command("report")
-    .description("Markdown for a pull request: listing changes, check results and coverage against a base ref")
+    .description("Markdown for a pull request: listing changes, check results, coverage against a base ref, and the posts and clips a merge sends out")
     .option("--base <ref>", "Git ref to compare with", "origin/main")
     .option("-o, --output <file>", "Write the report to a file")
     .action(async (opts: { base: string; output?: string }) => {
       const project = await load();
       const base = await loadProjectAtRef(project.root, opts.base);
-      const md = specReport(base, project);
+      const md = specReport(base, project) + (await outboxReport(project.root));
       if (opts.output) await writeFile(opts.output, `${md}\n`);
       else console.log(md);
       if (hasErrors(lintProject(project))) process.exitCode = 1;

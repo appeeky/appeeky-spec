@@ -13,6 +13,8 @@ COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 RUN npm ci --ignore-scripts
 COPY src ./src
 COPY skills ./skills
+COPY agents ./agents
+COPY vendor ./vendor
 COPY README.md LICENSE ./
 RUN npm run build && npm pack --silent && mv appeeky-spec-*.tgz /tmp/appeeky-spec.tgz
 

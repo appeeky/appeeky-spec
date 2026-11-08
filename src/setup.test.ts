@@ -41,18 +41,21 @@ describe("doctor", () => {
     const project = { ...makeProject({ stores: { appStore: { appId: "1" } }, targets: { us: [] } }), root };
     const checks = diagnose(root, project, env, "18.0.0");
     const byArea = Object.fromEntries(checks.map((c) => [c.area, c.status]));
-    expect(byArea).toMatchObject({ node: "fail", "App Store": "fail", "App Store listing": "warn", targets: "fail", "GitHub Actions": "warn", ".gitignore": "warn" });
+    expect(byArea).toMatchObject({ node: "fail", "App Store": "fail", "App Store listing": "warn", targets: "fail", "GitHub Actions": "warn", "specialist agents": "warn", ".gitignore": "warn" });
   });
   it("is happy with keys, targets, workflows and skills in place", () => {
     const root = mkdtempSync(join(tmpdir(), "spec-doctor-"));
     mkdirSync(join(root, ".github", "workflows"), { recursive: true });
     writeFileSync(join(root, ".github", "workflows", "listing-check.yml"), "- uses: appeeky/appeeky-spec@v0\n");
     mkdirSync(join(root, ".claude", "skills", "appeeky-spec"), { recursive: true });
+    mkdirSync(join(root, ".claude", "agents"), { recursive: true });
+    writeFileSync(join(root, ".claude", "agents", "appeeky-aso.md"), "---\nname: appeeky-aso\n---\n");
     writeFileSync(join(root, ".gitignore"), ".appeeky/\n");
     const project = { ...makeProject({ stores: { appStore: { appId: "1" } }, targets: { us: ["rain"], de: ["regen"] } }, { "en-US": { name: "Sleep" } }), root };
     const checks = diagnose(root, project, { PATH: "", APPEEKY_API_KEY: "k" } as NodeJS.ProcessEnv, "22.1.0");
     expect(checks.filter((c) => c.status === "fail")).toEqual([]);
     expect(checks.find((c) => c.area === "App Store")?.detail).toContain("hosted");
+    expect(checks.find((c) => c.area === "specialist agents")).toMatchObject({ status: "ok", detail: "installed for claude" });
   });
 });
 

@@ -1,11 +1,13 @@
-# Once a week, an agent proposes one listing change as a pull request, for a store with no
-# release still being measured. Nothing reaches the stores until someone merges it.
+# Once a week, the co-founder review: the specialist subagents read the repo, then an agent writes
+# a brief to appeeky/briefs/ and proposes one listing change as a pull request, for a store with
+# no release still being measured. Nothing reaches the stores until someone merges it.
 #
 # Secrets: for the agent, CLAUDE_CODE_OAUTH_TOKEN (run `claude setup-token` on your computer;
 # it uses your Claude Pro or Max plan) or ANTHROPIC_API_KEY (billed per use). APPEEKY_API_KEY
 # for data, reviews and competitors (optional), and ATTRIBUTION_TOKEN with a self-hosted
 # attribution server (optional).
-# Copy propose.md to .github/appeeky-propose.md.
+# Run `npx @appeeky/spec agents install` and commit .claude/ (the review and the specialists), or
+# copy propose.md to .github/appeeky-propose.md to keep your own version of the review.
 name: Appeeky Spec weekly proposal
 on:
   schedule: [{ cron: "0 7 * * 1" }]
@@ -21,6 +23,8 @@ jobs:
       ATTRIBUTION_TOKEN: ${{ secrets.ATTRIBUTION_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release specialist reads the app's history since the last version
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
 
@@ -29,42 +33,46 @@ jobs:
           npx -y @appeeky/spec data pull || true
           npx -y @appeeky/spec reviews pull || true
           npx -y @appeeky/spec competitors pull || true
+          npx -y @appeeky/spec social pull || true
+          npx -y @appeeky/spec ugc pull || true
 
       - name: Find a store that is free to change
         id: free
         run: |
           free=$(npx -y @appeeky/spec status --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).free.join(" ")))')
           echo "stores=$free" >> "$GITHUB_OUTPUT"
-          [ -n "$free" ] || echo "Every store has a release being measured. Nothing to propose this week."
+          [ -n "$free" ] || echo "Every store has a release being measured: this week's review writes the brief only."
 
-      - name: Ask the agent for one change
-        if: steps.free.outputs.stores != ''
+      - name: Co-founder review
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           npm install -g @anthropic-ai/claude-code
-          claude -p "$(cat .github/appeeky-propose.md)
+          prompt=.github/appeeky-propose.md
+          [ -f "$prompt" ] || prompt=.claude/commands/appeeky-cofounder.md
+          # The context goes first: a prompt that starts with the command's "---" would be read as an option.
+          claude -p "Today is $(date -u +%F). Stores free to change: ${{ steps.free.outputs.stores || 'none (write the brief only)' }}.
 
-          Stores free to change: ${{ steps.free.outputs.stores }}" \
-            --allowedTools "Read" "Edit" "Write" "Bash(npx @appeeky/spec *)"
+          $(cat "$prompt")" < /dev/null \
+            --allowedTools "Read" "Edit" "Write" "Glob" "Grep" "Task" "Agent" "Bash(appeeky-spec *)" "Bash(npx @appeeky/spec *)" "Bash(npx -y @appeeky/spec *)" "Bash(git log *)" "Bash(git tag *)" \
+            --disallowedTools "Bash(appeeky-spec push*)" "Bash(appeeky-spec social push*)" "Bash(appeeky-spec reviews push*)" "Bash(appeeky-spec ugc generate --yes*)" "Bash(appeeky-spec ugc generate --local --yes*)" "Bash(appeeky-spec visibility scan --local --yes*)" "Bash(appeeky-spec seo ranks*--yes*)" "Bash(appeeky-spec seo keywords*--yes*)" "Bash(appeeky-spec seo domain*--yes*)" "Bash(appeeky-spec revert*)" "Bash(npx @appeeky/spec push*)" "Bash(npx @appeeky/spec social push*)" "Bash(npx @appeeky/spec reviews push*)" "Bash(npx @appeeky/spec ugc generate --yes*)" "Bash(npx @appeeky/spec ugc generate --local --yes*)" "Bash(npx @appeeky/spec visibility scan --local --yes*)" "Bash(npx @appeeky/spec seo ranks*--yes*)" "Bash(npx @appeeky/spec seo keywords*--yes*)" "Bash(npx @appeeky/spec seo domain*--yes*)" "Bash(npx @appeeky/spec revert*)" "Bash(npx -y @appeeky/spec push*)" "Bash(npx -y @appeeky/spec social push*)" "Bash(npx -y @appeeky/spec reviews push*)" "Bash(npx -y @appeeky/spec ugc generate --yes*)" "Bash(npx -y @appeeky/spec ugc generate --local --yes*)" "Bash(npx -y @appeeky/spec visibility scan --local --yes*)" "Bash(npx -y @appeeky/spec seo ranks*--yes*)" "Bash(npx -y @appeeky/spec seo keywords*--yes*)" "Bash(npx -y @appeeky/spec seo domain*--yes*)" "Bash(npx -y @appeeky/spec revert*)"
 
       - name: Open the pull request
-        if: steps.free.outputs.stores != ''
         env:
           # A pull request opened with the default token does not start other workflows, so the
           # spec's pull request check would not run on it. A fine-grained token or a GitHub App
           # token with contents and pull requests write access does: set it as PROPOSAL_TOKEN.
           GH_TOKEN: ${{ secrets.PROPOSAL_TOKEN || github.token }}
         run: |
-          if git diff --quiet -- appeeky/store appeeky.spec.yaml || [ ! -f .appeeky/proposal.md ]; then
+          if [ ! -f .appeeky/proposal.md ] || [ -z "$(git status --porcelain -- appeeky/store appeeky.spec.yaml appeeky/briefs appeeky/social/drafts appeeky/ugc/briefs)" ]; then
             echo "The agent proposed nothing."; exit 0
           fi
           branch="listing/weekly-$(date +%F)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add appeeky/store appeeky.spec.yaml
+          git add appeeky/store appeeky.spec.yaml appeeky/briefs appeeky/social/drafts appeeky/ugc/briefs
           git commit -m "$(head -1 .appeeky/proposal.md)"
           git push origin "$branch"
           gh pr create --title "$(head -1 .appeeky/proposal.md)" --body-file .appeeky/proposal.md

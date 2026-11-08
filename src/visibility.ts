@@ -114,6 +114,8 @@ export async function remotePrompts(api: AppeekyApi, appId: string, country: str
 
 export interface VisibilityFile {
   pulledAt: string;
+  /** Where the answers came from: Appeeky AI Visibility, or `visibility scan --local` on your own keys. */
+  source?: "appeeky" | "local";
   country: string;
   store: StoreId;
   appId: string;
@@ -189,7 +191,7 @@ export function visibilityChanges(prev: VisibilityFile, next: VisibilityFile): s
   return out;
 }
 
-async function recordChanges(root: string, date: string, country: string, changes: string[]): Promise<void> {
+export async function recordChanges(root: string, date: string, country: string, changes: string[]): Promise<void> {
   if (changes.length === 0) return;
   const file = visibilityChangesFile(root);
   const old = existsSync(file) ? await readFile(file, "utf8") : "# AI visibility changes\n\nWritten by `visibility pull`: intents the assistants started or stopped naming the app for.\n";

@@ -19,7 +19,7 @@ Run commands as `npx @appeeky/spec <command> --json`.
 | --- | --- |
 | `APPEEKY_API_KEY` with the store connected in Appeeky | `conversion`, `page_views`, `downloads`, `proceeds`, `trials` |
 | RevenueCat connected in Appeeky (app-scoped project) | `revenue`, `rc_trials`, `trial_conversion` |
-| Apple Search Ads connected | `ad_installs`, `cpa` |
+| Apple Search Ads connected in Appeeky, or `search-ads pull` | `ad_installs`, `cpa` |
 | Meta / TikTok campaigns under `ads:` | `meta_spend`, `meta_installs`, `meta_cpi`, `tiktok_spend`, `tiktok_conversions`, `tiktok_cpa` |
 | `attribution:` in the spec | `organic_installs`, `organic_revenue`, `organic_paid`, and with `--link`: `link_clicks`, `link_installs`, `link_revenue` |
 | reviews pulled | `rating`, `low_ratings` |
@@ -71,10 +71,20 @@ npx @appeeky/spec experiment close <id> --value 3.1 --note "Hook B: 3.1 installs
 ## 5. Ads
 
 - `ads --json` gives spend, installs and cost per install for the last `--days` (default 30). It covers Apple Search Ads and the Meta and TikTok campaigns listed under `ads:` in the spec.
+- With the user's own Search Ads key, `search-ads pull` writes `appeeky/search-ads/`: `daily.csv`, `keywords.csv`, `search-terms.csv` and `summary.md`. The key is saved on the App Store Connect CLI account (`appstore accounts search-ads <account> --client-id … --team-id … --key-id … --private-key-path …`, the account in `stores.appStore.account`), or set as `ASA_*` env in CI. It reads only the campaigns for the App Store app (`stores.appStore.searchAds` sets the org and the campaigns). The summary lists search terms that installed and are not targets yet: propose them as targets, since ranking for them organically is free. `ads` and `verify` then read Search Ads from these files, without Appeeky.
 - `--save` keeps a copy in `appeeky/ads/<date>.yaml`.
 - Campaigns are listed by id. Ask the user which campaigns promote this app; never guess from names.
 
-## 6. Data for analysis
+## 6. Social posts and UGC videos
+
+With accounts and creator personas set up in Appeeky (`APPEEKY_API_KEY`):
+
+- `social pull` writes the connected accounts, recent posts and how each did to `appeeky/social/` (read `summary.md`). `ugc pull` writes the personas (`ready` when they can make clips) and their clips to `appeeky/ugc/`.
+- To post: write `appeeky/social/drafts/<date>-<slug>.yaml` (`accounts`, `text`, `when`, `media`, `why`) and run `social check`. To make a video: write `appeeky/ugc/briefs/<date>-<slug>.yaml` (`persona`, `script`, `scene`, `caption`, `durationSec`, `aspectRatio`, `why`) and run `ugc generate --dry-run` for its cost.
+- Open a pull request. `social push` and `ugc generate` run after the merge (the push workflow does it). Never run them, or `ugc generate --yes`, unless the user asked: posts are public and clips use media credits.
+- Give each post or video its own smart link (`experiment add --link <channel>`) so `experiment close` can say what it brought.
+
+## 7. Data for analysis
 
 `data pull --json` writes CSV files the agent can read: store analytics, traffic sources, sales, Apple Search Ads, RevenueCat, Meta and TikTok per day. It also writes attribution by source, keyword and smart link. `--days` defaults to 90, and `README.md` in the folder says what each file holds.
 

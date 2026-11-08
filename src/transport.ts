@@ -74,7 +74,7 @@ export type Runner = (
   env?: Record<string, string>,
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-const defaultRunner: Runner = (command, args, env) =>
+export const defaultRunner: Runner = (command, args, env) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
