@@ -5,7 +5,7 @@
   "license": "FSL-1.1-MIT",
   "type": "module",
   "bin": {
-    "appeeky-spec": "./dist/bin.js"
+    "appeeky-spec": "dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,7 +22,10 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "skills",
+    "agents",
+    ".github/assets/cover.gif",
     "LICENSE",
     "README.md"
   ],
@@ -34,7 +37,7 @@
     "type": "git",
     "url": "git+https://github.com/appeeky/appeeky-spec.git"
   },
-  "homepage": "https://github.com/appeeky/appeeky-spec#readme",
+  "homepage": "https://spec.appeeky.com",
   "bugs": {
     "url": "https://github.com/appeeky/appeeky-spec/issues"
   },
@@ -54,14 +57,16 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"for (const f of ['ugc-core.js','visibility-core.js']) require('fs').copyFileSync('vendor/'+f,'dist/'+f)\"",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
     "pack:check": "npm run build && npm pack --dry-run",
-    "release:dry": "node scripts/release.mjs --dry-run"
+    "release:dry": "node scripts/release.mjs --dry-run",
+    "vendor:ugc": "node scripts/vendor-ugc-core.mjs",
+    "vendor:visibility": "node scripts/vendor-visibility-core.mjs"
   },
   "dependencies": {
     "commander": "^13.1.0",
@@ -70,6 +75,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"
   }

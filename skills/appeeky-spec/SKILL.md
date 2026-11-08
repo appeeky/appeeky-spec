@@ -1,6 +1,6 @@
 ---
 name: appeeky-spec
-description: Improve and ship an app's App Store / Google Play listing with Appeeky Spec (appeeky.spec.yaml + appeeky/store). Use when asked to do ASO on a repo, change an app's name, subtitle, keywords, promotional text or descriptions, check keyword coverage, set up listing-as-code or its GitHub Action, handle App Store screenshots, or push listing changes to App Store Connect or Google Play, or run the weekly growth routine. To choose target keywords see appeeky-spec-targets; for a new language or country see appeeky-spec-localize; to judge past releases see appeeky-spec-review; for AI assistants and the category chart see appeeky-spec-visibility; for screenshots, UGC, ads, pricing, attribution and data see appeeky-spec-experiments.
+description: Improve and ship an app's App Store / Google Play listing with Appeeky Spec (appeeky.spec.yaml + appeeky/store). Use when asked to do ASO on a repo, change an app's name, subtitle, keywords, promotional text or descriptions, check keyword coverage, set up listing-as-code or its GitHub Action, handle App Store screenshots, or push listing changes to App Store Connect or Google Play, or run the weekly growth routine (the co-founder review with the specialist subagents). To choose target keywords see appeeky-spec-targets; for a new language or country see appeeky-spec-localize; to judge past releases see appeeky-spec-review; for AI assistants and the category chart see appeeky-spec-visibility; for screenshots, UGC, ads, pricing, attribution and data see appeeky-spec-experiments.
 metadata:
   version: 1.3.0
 ---
@@ -20,7 +20,8 @@ The app's store listings live in files, and every push is recorded and measured.
 | `appeeky/playbook.md` | what worked and what did not for this app |
 | `appeeky/reviews/` | customer reviews per month (JSONL), `summary.md`, and `replies/` drafted for review |
 | `appeeky/competitors/<name>.yaml` | each competitor's listing, best ranks, ranks on your targets, recent low ratings |
-| `appeeky/visibility/<country>.yaml` | whether ChatGPT, Claude, Gemini and Perplexity name the app per intent, who they name instead, the pages they cite, suggested fixes; `changes.md` beside it |
+| `appeeky/visibility/<country>.yaml` | whether ChatGPT, Claude, Gemini and Perplexity name the app per intent, who they name instead, the pages they cite, suggested fixes; `changes.md` beside it (`history.csv` and `answers/` with `--local` scans) |
+| `appeeky/seo/` | Google Search Console for the app's website: `daily.csv`, `queries.csv`, `pages.csv`, `summary.md` (`seo pull`) |
 | `appeeky/category.csv` | rank in the category chart (top 100), one row a day |
 | `.appeeky/data/*.csv` (or `appeeky/data/`) | analytics, Search Ads, RevenueCat, Meta and TikTok per day; `README.md` says what each file holds |
 
@@ -46,7 +47,7 @@ In a terminal the user runs, `init` with no options is a guided setup. It finds 
 | --- | --- | --- |
 | `listing-check.yml` | every pull request | comments what the listing changes do (`report`), fails on check errors |
 | `listing-push.yml` | merge to main touching `appeeky/store/**` or the spec | `push --yes`, then commits the release file |
-| `listing-daily.yml` | daily 06:00 UTC | `category pull`, `visibility pull`, `verify --playbook`, `reviews pull`, `competitors pull`, then commits |
+| `listing-daily.yml` | daily 06:00 UTC | `category pull`, `visibility pull`, `verify --playbook`, `reviews pull`, `competitors pull`, `social pull`, `ugc pull`; `seo pull` with `GSC_CREDENTIALS` and `visibility scan --local` every `VISIBILITY_EVERY` days; then commits |
 
 The merge is the approval gate: nothing reaches the store unless a person merged it. The workflows need `APPEEKY_API_KEY` (or store keys) as repository secrets.
 
@@ -71,23 +72,18 @@ Without CI, a person runs `push`. Never take over that gate with `--yes`.
 
 Never run `pull` over uncommitted listing edits: it overwrites local files.
 
-### Weekly routine
+### Weekly routine: the co-founder review
 
-For a scheduled or "what should we do this week" run, propose exactly one listing change. Make it for a `free` store (`status --json`), never one with a release still being measured.
+For a scheduled or "what should we do this week" run, follow the co-founder review: `agents/cofounder.md` in this package, installed as the `/appeeky-cofounder` command by `agents install`.
 
-1. Read the sources:
-   - `status`, `appeeky/loops.md`, `appeeky/playbook.md`
-   - `appeeky/competitors/changes.md`, `appeeky/reviews/summary.md`, `appeeky/visibility/changes.md`
-   - `.appeeky/data/README.md`
-2. Pick the change most likely to win:
-   - an uncovered target,
-   - words users write in reviews,
-   - a search a competitor just climbed,
-   - an intent the assistants answer with competitors.
+1. `status --json`: only the `free` stores may change. Read `appeeky/loops.md`, `appeeky/playbook.md` and the latest brief in `appeeky/briefs/`.
+2. Start the specialist subagents in parallel: `appeeky-aso`, `appeeky-reviews`, `appeeky-ads`, `appeeky-releases`, `appeeky-ugc`, `appeeky-social`. They only read, and each returns findings and up to two candidate changes. Without subagents, do their checklists yourself.
+3. Pick exactly one change for a free store, the one with the strongest evidence. Never repeat a change the playbook says lost.
+4. Edit, then `check` and `diff`.
+5. Write the brief to `appeeky/briefs/<date>.md`: where things stand, what each specialist found, the change (or why none), what is for a person (replies, ads, product requests, the next UGC experiment, posts to publish), and what was not picked.
+6. Write `.appeeky/proposal.md` for the pull request. Do not `push`. A person merges; the push runs on merge.
 
-   Do not repeat a change the playbook says lost.
-3. Edit, then `check` and `diff`. Write the pull request: what changes, why (with the numbers), which metric should move and when it is checked.
-4. Do not `push`. A person merges; the push runs on merge.
+`npx @appeeky/spec agents install` writes the specialists and the command into `.claude/` (`--for opencode` or `all` for `.opencode/`). Commit them so scheduled runs have them too.
 
 To run it every week without anyone starting it:
 
@@ -97,7 +93,7 @@ To run it every week without anyone starting it:
 | The user's machine | `examples/weekly/weekly.sh` with cron or launchd |
 | The user's own server | `WEEKLY_AT=0 7 * * 1` in the docker `.env`, with the `latest-agent` image |
 
-All of them copy `examples/weekly/propose.md` to `.github/appeeky-propose.md`.
+Each uses `.github/appeeky-propose.md` when it exists, otherwise the installed `.claude/commands/appeeky-cofounder.md`. The pull request carries the brief, and the listing change when there is one.
 
 The agent needs one of two things:
 - **`CLAUDE_CODE_OAUTH_TOKEN`:** the user runs `claude setup-token` once on their computer. Runs then count against their Claude Pro or Max plan, with no API key.

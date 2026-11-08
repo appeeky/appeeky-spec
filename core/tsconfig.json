@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "lib": ["ES2022", "DOM"],
+    "paths": { "@appeeky/visibility-parsers": ["../../appeeky/apps/api/src/services/ai-visibility/web-search-parsers.ts"] },
+    "allowImportingTsExtensions": true
+  },
+  "include": ["."]
+}

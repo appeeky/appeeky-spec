@@ -32,6 +32,10 @@ export const METRICS = {
   tiktok_conversions: { label: "TikTok conversions/day", kind: "count", better: "up" },
   tiktok_cpa: { label: "TikTok cost per conversion", kind: "money", better: "down" },
   ai_visibility: { label: "AI answers that name the app", kind: "rate", better: "up" },
+  search_clicks: { label: "Google search clicks/day", kind: "count", better: "up" },
+  search_impressions: { label: "Google search impressions/day", kind: "count", better: "up" },
+  web_rank: { label: "average Google position of the site", kind: "count", better: "down" },
+  ai_overview_citations: { label: "Google AI Overviews that cite the site", kind: "rate", better: "up" },
   category_rank: { label: "category rank", kind: "count", better: "down" },
 } as const satisfies Record<string, { label: string; kind: "rate" | "count" | "money"; better: "up" | "down" }>;
 

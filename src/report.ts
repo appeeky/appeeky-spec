@@ -8,6 +8,8 @@ import { diffListings } from "./diff.js";
 import { loadProject, SPEC_DIR, SPEC_FILE } from "./files.js";
 import { lintProject } from "./lint.js";
 import { STORES, type Listing, type Project, type StoreListings } from "./schema.js";
+import { draftIssues, readAccounts, readDrafts } from "./social.js";
+import { readBriefs } from "./ugc.js";
 
 const run = promisify(execFile);
 
@@ -70,6 +72,40 @@ export function specReport(base: Project | null, head: Project): string {
       const pct = b ? `${b.percent}% → ${r.percent}%` : `${r.percent}%`;
       out.push(`| ${label(r)} | ${pct} | ${gained.join(", ") || "—"} | ${lost.length > 0 ? `**${lost.join(", ")}**` : "—"} |`);
     }
+  }
+  return out.join("\n");
+}
+
+const cell = (s: string, n = 90) => s.replace(/\n+/g, " ").replace(/\|/g, "\\|").slice(0, n);
+
+/**
+ * The posts and clips a merge sends out: social drafts and UGC briefs still marked draft, so a
+ * reviewer sees them next to the listing change. Empty when there are none.
+ */
+export async function outboxReport(root: string, now = new Date()): Promise<string> {
+  const out: string[] = [];
+  const rel = (f: string) => relative(root, f);
+  try {
+    const drafts = (await readDrafts(root)).filter((d) => d.status === "draft");
+    if (drafts.length > 0) {
+      const accounts = await readAccounts(root);
+      out.push("", `**${drafts.length} post${drafts.length === 1 ? " goes" : "s go"} out on merge**`, "", "| Draft | Accounts | When | Text |", "| --- | --- | --- | --- |");
+      for (const d of drafts) out.push(`| ${rel(d.file)} | ${d.accounts.join(", ")} | ${d.when ?? "on merge"} | ${cell(d.text)} |`);
+      if (accounts.length === 0) out.push("", "- ⚠️ No accounts in appeeky/social/accounts.yaml: run `social pull` so the drafts can be checked.");
+      else for (const d of drafts) for (const issue of draftIssues(d, accounts, now)) out.push(`- ⚠️ ${rel(d.file)}: ${issue}`);
+    }
+  } catch (err) {
+    out.push("", `- ❌ Social drafts: ${(err as Error).message}`);
+  }
+  try {
+    const briefs = (await readBriefs(root)).filter((b) => b.status === "draft");
+    if (briefs.length > 0) {
+      out.push("", `**${briefs.length} clip${briefs.length === 1 ? "" : "s"} made on merge**`, "", "| Brief | Persona | Length | Script |", "| --- | --- | --- | --- |");
+      for (const b of briefs) out.push(`| ${rel(b.file)} | ${b.persona} | ${b.durationSec ?? 8}s ${b.aspectRatio ?? "9:16"} | ${cell(b.script)} |`);
+      out.push("", "Run `ugc generate --dry-run` (or `--local --dry-run`) for the cost.");
+    }
+  } catch (err) {
+    out.push("", `- ❌ UGC briefs: ${(err as Error).message}`);
   }
   return out.join("\n");
 }

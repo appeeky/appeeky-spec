@@ -53,13 +53,22 @@ function channelFrom(id: AdsChannelId, w: MetricWindow): AdsChannel | null {
 }
 
 /** Every paid channel this spec can read, over the `days` up to `now` (today left out: it is not over yet). */
-export async function adsSnapshot(api: AppeekyApi, spec: SpecFile, app: { store: StoreId; appId: string } | null, days: number, now = new Date()): Promise<AdsSnapshot> {
+export async function adsSnapshot(
+  api: AppeekyApi | null,
+  spec: SpecFile,
+  app: { store: StoreId; appId: string } | null,
+  days: number,
+  now = new Date(),
+  /** Apple Search Ads pulled with your own key (appeeky/search-ads/); used instead of Appeeky's. */
+  ownSearchAds: MetricSource | null = null,
+): Promise<AdsSnapshot> {
   const to = now.toISOString().slice(0, 10);
   const from = new Date(Date.parse(to) - Math.max(1, days) * 86_400_000).toISOString().slice(0, 10);
   const sources: Array<[AdsChannelId, MetricSource]> = [];
-  if (app) sources.push(["apple-search-ads", appeekyMetricSource(api)]);
-  if (spec.ads.meta) sources.push(["meta", metaMetricSource(api, spec.ads.meta)]);
-  if (spec.ads.tiktok) sources.push(["tiktok", tiktokMetricSource(api, spec.ads.tiktok)]);
+  if (app && ownSearchAds) sources.push(["apple-search-ads", ownSearchAds]);
+  else if (app && api) sources.push(["apple-search-ads", appeekyMetricSource(api)]);
+  if (api && spec.ads.meta) sources.push(["meta", metaMetricSource(api, spec.ads.meta)]);
+  if (api && spec.ads.tiktok) sources.push(["tiktok", tiktokMetricSource(api, spec.ads.tiktok)]);
 
   const snapshot: AdsSnapshot = { from, to, days: Math.max(1, days), channels: [], errors: [] };
   for (const [id, source] of sources) {

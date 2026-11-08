@@ -4,9 +4,10 @@
 # Each routine clones the repo, does one thing, commits what it wrote and exits. All
 # state lives in the repo, so the container keeps nothing between runs.
 #
-#   daily     category rank, AI visibility, verify, reviews, competitors (once a day)
+#   daily     category rank, AI visibility, Google search, verify, reviews, competitors (once a day)
 #   push      push merged listing changes to the stores (every 10–15 minutes)
-#   weekly    an agent proposes one listing change as a pull request (image built with AGENT=1)
+#   weekly    the co-founder review: specialists read, an agent writes a brief and proposes one
+#             listing change as a pull request (image built with AGENT=1)
 #   schedule  stay up and run the routines above on a schedule (docker compose, Railway, Fly)
 #
 # Pick one with MODE=<routine> or as the first argument.
@@ -24,6 +25,11 @@
 #   weekly:           CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`: uses your Claude Pro or Max plan)
 #                     or ANTHROPIC_API_KEY (billed per use)
 #   ATTRIBUTION_TOKEN with a self-hosted attribution server
+#   daily, your own keys: GSC_CREDENTIALS (Search Console service account JSON) for seo pull;
+#                     ASA_CLIENT_ID, ASA_TEAM_ID, ASA_KEY_ID, ASA_PRIVATE_KEY for search-ads pull;
+#                     DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD for seo ranks every SEO_RANKS_EVERY days (7);
+#                     VISIBILITY_EVERY=<days> with OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY
+#                     or PERPLEXITY_API_KEY for visibility scan --local
 set -eu
 
 MODE="${1:-${MODE:-}}"
@@ -32,6 +38,8 @@ BRANCH="${BRANCH:-main}"
 SPEC_DIR="${SPEC_DIR:-.}"
 TAG="appeeky-spec/pushed"
 LISTING="appeeky/store appeeky.spec.yaml"
+# Social posts and UGC briefs approved by a merged pull request.
+OUTBOX="appeeky/social/drafts appeeky/ugc/briefs"
 
 log() { echo "[appeeky-spec $MODE] $*"; }
 
@@ -99,7 +107,13 @@ case "$MODE" in
     appeeky-spec verify --playbook
     appeeky-spec reviews pull || true
     appeeky-spec competitors pull || true
-    save "Daily: category, AI visibility, verify, reviews, competitors"
+    appeeky-spec social pull || true
+    appeeky-spec ugc pull || true
+    if [ -n "${GSC_CREDENTIALS:-}" ]; then appeeky-spec seo pull || true; fi
+    if [ -n "${ASA_CLIENT_ID:-}" ]; then appeeky-spec search-ads pull || true; fi
+    if [ -n "${DATAFORSEO_LOGIN:-}" ]; then appeeky-spec seo ranks --every "${SEO_RANKS_EVERY:-7}" --yes || true; fi
+    if [ -n "${VISIBILITY_EVERY:-}" ]; then appeeky-spec visibility scan --local --every "$VISIBILITY_EVERY" --yes || true; fi
+    save "Daily: category, AI visibility, search, Search Ads, verify, reviews, competitors, social, UGC"
     ;;
 
   push)
@@ -113,6 +127,20 @@ case "$MODE" in
     fi
     last="$(git rev-parse "refs/tags/$TAG^{commit}")"
     if [ "$last" = "$(git rev-parse HEAD)" ]; then log "Up to date."; exit 0; fi
+    # Posts and clips a merged pull request approved: only drafts still marked draft are sent.
+    # shellcheck disable=SC2086
+    if ! git diff --quiet "$last" HEAD -- $OUTBOX; then
+      # With FAL_KEY set, clips render here on your own fal account instead of with Appeeky credits.
+      ugc_where=""; [ -n "${FAL_KEY:-}" ] && ugc_where="--local"
+      if [ "${PUSH_DRY_RUN:-}" = "1" ]; then
+        appeeky-spec social check || true
+        appeeky-spec ugc generate $ugc_where --dry-run || true
+      else
+        appeeky-spec social push --yes || log "Some posts were not sent (see above)."
+        appeeky-spec ugc generate $ugc_where --yes || log "Some clips were not made (see above)."
+        save "Record sent posts and clips"
+      fi
+    fi
     # shellcheck disable=SC2086
     if git diff --quiet "$last" HEAD -- $LISTING; then
       if [ "${PUSH_DRY_RUN:-}" != "1" ]; then mark; fi
@@ -140,24 +168,30 @@ case "$MODE" in
   weekly)
     command -v claude >/dev/null || { log "This image has no agent. Use the -agent image or build with --build-arg AGENT=1."; exit 1; }
     [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ] || { log "Set CLAUDE_CODE_OAUTH_TOKEN (run \`claude setup-token\` on your computer) or ANTHROPIC_API_KEY."; exit 1; }
+    # The co-founder review: .github/appeeky-propose.md if you keep your own, else the one `agents install` wrote.
     prompt=".github/appeeky-propose.md"
-    [ -f "$prompt" ] || { log "Missing $prompt (copy examples/weekly/propose.md)."; exit 1; }
+    [ -f "$prompt" ] || prompt=".claude/commands/appeeky-cofounder.md"
+    [ -f "$prompt" ] || { log "No review prompt: run \`appeeky-spec agents install\` in the repo and commit it."; exit 1; }
     appeeky-spec data pull || true
     appeeky-spec reviews pull || true
     appeeky-spec competitors pull || true
+    appeeky-spec social pull || true
+    appeeky-spec ugc pull || true
     free="$(appeeky-spec status --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).free.join(" ")))')"
-    [ -n "$free" ] || { log "Every store has a release being measured."; exit 0; }
     rm -f .appeeky/proposal.md
-    claude -p "$(cat "$prompt")
-
+    # The context goes first: a prompt that starts with the command's "---" would be read as an option.
+    claude -p "Today is $(date -u +%F). Stores free to change: ${free:-none (write the brief only)}.
 The CLI is installed as \`appeeky-spec\`: run it as \`appeeky-spec <command>\` instead of \`npx @appeeky/spec <command>\`.
-Stores free to change: $free" --allowedTools "Read" "Edit" "Write" "Bash(appeeky-spec *)"
+
+$(cat "$prompt")" < /dev/null \
+      --allowedTools "Read" "Edit" "Write" "Glob" "Grep" "Task" "Agent" "Bash(appeeky-spec *)" "Bash(npx @appeeky/spec *)" "Bash(npx -y @appeeky/spec *)" "Bash(git log *)" "Bash(git tag *)" \
+      --disallowedTools "Bash(appeeky-spec push*)" "Bash(appeeky-spec social push*)" "Bash(appeeky-spec reviews push*)" "Bash(appeeky-spec ugc generate --yes*)" "Bash(appeeky-spec ugc generate --local --yes*)" "Bash(appeeky-spec visibility scan --local --yes*)" "Bash(appeeky-spec seo ranks*--yes*)" "Bash(appeeky-spec seo keywords*--yes*)" "Bash(appeeky-spec seo domain*--yes*)" "Bash(appeeky-spec revert*)" "Bash(npx @appeeky/spec push*)" "Bash(npx @appeeky/spec social push*)" "Bash(npx @appeeky/spec reviews push*)" "Bash(npx @appeeky/spec ugc generate --yes*)" "Bash(npx @appeeky/spec ugc generate --local --yes*)" "Bash(npx @appeeky/spec visibility scan --local --yes*)" "Bash(npx @appeeky/spec seo ranks*--yes*)" "Bash(npx @appeeky/spec seo keywords*--yes*)" "Bash(npx @appeeky/spec seo domain*--yes*)" "Bash(npx @appeeky/spec revert*)" "Bash(npx -y @appeeky/spec push*)" "Bash(npx -y @appeeky/spec social push*)" "Bash(npx -y @appeeky/spec reviews push*)" "Bash(npx -y @appeeky/spec ugc generate --yes*)" "Bash(npx -y @appeeky/spec ugc generate --local --yes*)" "Bash(npx -y @appeeky/spec visibility scan --local --yes*)" "Bash(npx -y @appeeky/spec seo ranks*--yes*)" "Bash(npx -y @appeeky/spec seo keywords*--yes*)" "Bash(npx -y @appeeky/spec seo domain*--yes*)" "Bash(npx -y @appeeky/spec revert*)"
     # shellcheck disable=SC2086
-    if git diff --quiet -- $LISTING || [ ! -f .appeeky/proposal.md ]; then log "Nothing proposed."; exit 0; fi
+    if [ ! -f .appeeky/proposal.md ] || [ -z "$(git status --porcelain -- $LISTING appeeky/briefs $OUTBOX)" ]; then log "Nothing proposed."; exit 0; fi
     branch="listing/weekly-$(date -u +%F)"
     git switch --quiet -c "$branch"
     # shellcheck disable=SC2086
-    git add $LISTING
+    git add $LISTING appeeky/briefs $OUTBOX
     git commit --quiet -m "$(head -1 .appeeky/proposal.md)"
     git push --quiet origin "$branch"
     gh pr create --base "$BRANCH" --title "$(head -1 .appeeky/proposal.md)" --body-file .appeeky/proposal.md
