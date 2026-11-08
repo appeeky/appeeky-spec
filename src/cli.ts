@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { Command, Option } from "commander";
 import { adsSnapshot, CHANNEL_LABELS, saveAdsSnapshot } from "./ads.js";
 import { COFOUNDER_COMMAND, installAgents, parseTargets, TARGET_DIRS, type InstalledFile } from "./agents.js";
-import { attributionClient, attributionClients, attributionMetricSource, createExperimentLink, hasClients, IOS_LINK_NOTE, iosOnlyLink, isClient, linkResult, linkStore } from "./attribution.js";
+import { attributionClient, attributionClients, attributionMetricSource, createExperimentLink, hasClients, IOS_LINK_NOTE, iosOnlyLink, isClient, linkStore, linkValueReader } from "./attribution.js";
 import { pullCompetitors, similarApps } from "./competitors.js";
 import { draftIssues, fetchSocial, readAccounts, readDrafts, resolveAccounts, saveSocial, sendDraft } from "./social.js";
 import { fetchUgc, findPersona, generateBrief, quoteBrief, readBriefs, readPersonas, saveUgc } from "./ugc.js";
@@ -495,6 +495,9 @@ export function buildProgram(): Command {
         if (!g().json) console.log(`${c.green("Created")} App Store version ${created.versionString}`);
       }
       const issues = lintProject(project).filter((i) => i.severity === "error");
+      // Screenshots are not pushed, so their errors warn instead of stopping the listing push.
+      const shotErrors = (await checkScreenshots(project.root)).filter((i) => i.severity === "error");
+      if (shotErrors.length > 0 && !g().json) console.error(`${formatIssues(shotErrors)}\n${c.yellow("Screenshots are not uploaded by push; fix these before you upload them.")}\n`);
       if (issues.length > 0 && !opts.force) {
         if (g().json) printJson({ error: "check_failed", issues });
         else console.error(`${formatIssues(issues)}\n\n${c.red("Fix these first, or pass --force.")}`);
@@ -715,16 +718,16 @@ export function buildProgram(): Command {
     .option("--yes", "Send without asking", false)
     .action(async (opts: { yes: boolean }) => {
       const project = await load();
-      const a = api();
-      if (!a) throw new Error("Set APPEEKY_API_KEY: replies are sent through the store connections in Appeeky.");
       const drafts = (await readReplies(project.root)).filter((r) => r.status === "draft");
-      const blocked = drafts.filter((r) => replyIssues(r).length);
-      if (blocked.length) throw new Error(`Too long: ${blocked.map((r) => `${r.id} (${replyIssues(r).join(", ")})`).join("; ")}`);
       if (drafts.length === 0) {
         if (g().json) printJson({ sent: [] });
         else console.log(c.dim("No draft replies."));
         return;
       }
+      const a = api();
+      if (!a) throw new Error("Set APPEEKY_API_KEY: replies are sent through the store connections in Appeeky.");
+      const blocked = drafts.filter((r) => replyIssues(r).length);
+      if (blocked.length) throw new Error(`Too long: ${blocked.map((r) => `${r.id} (${replyIssues(r).join(", ")})`).join("; ")}`);
       if (!g().json) for (const r of drafts) console.log(`${c.bold(r.id)} ${c.dim(r.store)}\n  ${r.text}`);
       if (!opts.yes && !(await confirm(`Send ${drafts.length} repl${drafts.length === 1 ? "y" : "ies"}?`))) return;
       const sent: string[] = [];
@@ -1559,7 +1562,7 @@ export function buildProgram(): Command {
         ...(hasClients(attribution) ? [attributionMetricSource(attribution)] : []),
       ]);
       const results = await verifyReleases(project, rankSource(), { ids: ids.length ? ids : undefined, force: opts.now, metrics });
-      const measured = metrics ? await measureExperiments(project, metrics) : [];
+      const measured = await measureExperiments(project, metrics, new Date(), linkValueReader(project.spec, a));
       const lines = [...results.map(playbookLine), ...measured.map(experimentPlaybookLine)];
       const added = opts.playbook ? await appendPlaybook(project.root, lines) : 0;
       const experiments = dueExperiments(await readExperiments(project.root));
@@ -1699,12 +1702,8 @@ export function buildProgram(): Command {
       if (!e) throw new Error(`No experiment ${id}. See \`appeeky-spec experiment list\`.`);
       let value = o.value;
       const a = api();
-      if (value === undefined && e.link && (e.metric === "link_clicks" || e.metric === "link_installs" || e.metric === "link_revenue")) {
-        // The experiment's own smart link: its clicks, or the installs and revenue counted to it.
-        const client = attributionClient(project.spec, a, process.env, e.link.store);
-        const stats = isClient(client) ? await linkResult(client, e.link.slug).catch(() => null) : null;
-        if (stats) value = e.metric === "link_clicks" ? stats.clicks.total : e.metric === "link_installs" ? stats.installs : stats.revenueUsd;
-      }
+      // The experiment's own smart link: its clicks, or the installs and revenue counted to it.
+      if (value === undefined) value = await linkValueReader(project.spec, a)(e).catch(() => undefined);
       if (value === undefined && a && isMetricName(e.metric)) {
         const app = experimentApp(project, e);
         if (app) value = await metricAfter(metricSourceFor(a, project.spec), app.store, app.appId, e.metric, e.startedAt, e.checkAfterDays).catch(() => undefined);
@@ -1742,16 +1741,17 @@ export function buildProgram(): Command {
 
   program
     .command("report")
-    .description("Markdown for a pull request: listing changes, check results, coverage against a base ref, and the posts and clips a merge sends out")
+    .description("Markdown for a pull request: listing changes, listing and screenshot checks, coverage against a base ref, and the replies, posts and clips a merge sends out")
     .option("--base <ref>", "Git ref to compare with", "origin/main")
     .option("-o, --output <file>", "Write the report to a file")
     .action(async (opts: { base: string; output?: string }) => {
       const project = await load();
       const base = await loadProjectAtRef(project.root, opts.base);
-      const md = specReport(base, project) + (await outboxReport(project.root));
+      const shots = await checkScreenshots(project.root);
+      const md = specReport(base, project, shots) + (await outboxReport(project.root));
       if (opts.output) await writeFile(opts.output, `${md}\n`);
       else console.log(md);
-      if (hasErrors(lintProject(project))) process.exitCode = 1;
+      if (hasErrors([...lintProject(project), ...shots])) process.exitCode = 1;
     });
 
   return program;

@@ -219,7 +219,8 @@ Everything an agent needs to decide the next change, as plain files next to the 
 appeeky-spec reviews list --rating 1-2 --unanswered
 appeeky-spec reviews reply 1234567 --text "Sorry about that. 3.1 fixes the crash on launch."
 git checkout -b reviews/replies && git add appeeky/reviews && git commit -m "Reply to crash reports"
-# after the pull request is approved
+# the merge sends them (the push workflow and the Docker push routine run `reviews push --yes`)
+# or send them yourself, without a pull request:
 appeeky-spec reviews push
 ```
 
@@ -455,7 +456,7 @@ attribution:
 
 - `verify` measures what a listing change is for: **organic installs per day, the revenue they brought and the share that paid**, before and after each push. The server counts installs first seen in a window, so revenue covers what those installs have paid so far; older installs have had longer to pay, which makes a rise after a push a conservative reading.
 - `data pull` adds `attribution-sources.csv` (installs, trials, payers and revenue by source and campaign), `attribution-keywords.csv` (Search Ads keyword ids with the revenue they led to; Apple reports ids, the words are in your Search Ads account), `attribution-campaigns.csv`, `attribution-countries.csv` and `smart-links.csv`. It works with attribution alone, without an Appeeky key.
-- `experiment add --link [channel]` creates a smart link for the experiment: one URL that sends each visitor to the right store, with its installs and revenue counted to it. Use `--metric link_installs`, `link_revenue` or `link_clicks` and `experiment close` fills the value in. On iOS the App Store passes nothing from a click to a new install, so link installs are, in practice, Google Play installs (the SDK reads the link only on the app's first launch); for an App Store only app, measure `link_clicks` (or `organic_installs`).
+- `experiment add --link [channel]` creates a smart link for the experiment: one URL that sends each visitor to the right store, with its installs and revenue counted to it. Use `--metric link_installs`, `link_revenue` or `link_clicks` and `verify` closes it from the link once it is due (or `experiment close` fills the value in). On iOS the App Store passes nothing from a click to a new install, so link installs are, in practice, Google Play installs (the SDK reads the link only on the app's first launch); for an App Store only app, measure `link_clicks` (or `organic_installs`).
 
 ```bash
 appeeky-spec experiment add --type ugc --link tiktok --hypothesis "Before/after hooks get installs" --metric link_installs --target 50
@@ -500,7 +501,7 @@ jobs:
       - uses: appeeky/appeeky-spec@v0
 ```
 
-The action comments the listing changes, check results and coverage before → after, and fails when `check` finds errors.
+The action comments the listing changes, check results and coverage before → after, and fails when `check` finds errors in the listing or the screenshots. It also lists the review replies, social posts and UGC clips the merge sends out.
 
 ## Running without GitHub Actions
 

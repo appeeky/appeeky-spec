@@ -51,5 +51,5 @@ runs:
       if: steps.report.outputs.status != '0'
       shell: bash
       run: |
-        echo "::error::appeeky-spec check found errors in the listings."
+        echo "::error::appeeky-spec check found errors in the listings or screenshots."
         exit 1

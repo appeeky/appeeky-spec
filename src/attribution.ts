@@ -209,6 +209,21 @@ export async function createExperimentLink(
 }
 
 /** Clicks, installs and revenue of one smart link over the last 30 days. */
+export const LINK_METRICS = ["link_clicks", "link_installs", "link_revenue"] as const;
+
+/** Reads a link experiment's value: clicks, or the installs and revenue counted to its link. */
+export type LinkValue = (e: { metric: string; link?: { slug: string; store?: StoreId } }) => Promise<number | undefined>;
+
+export function linkValueReader(spec: SpecFile, api: AppeekyApi | undefined, env: NodeJS.ProcessEnv = process.env): LinkValue {
+  return async (e) => {
+    if (!e.link || !(LINK_METRICS as readonly string[]).includes(e.metric)) return undefined;
+    const client = attributionClient(spec, api, env, e.link.store);
+    const stats = isClient(client) ? await linkResult(client, e.link.slug).catch(() => null) : null;
+    if (!stats) return undefined;
+    return e.metric === "link_clicks" ? stats.clicks.total : e.metric === "link_installs" ? stats.installs : stats.revenueUsd;
+  };
+}
+
 export async function linkResult(client: AttributionClient, slug: string): Promise<LinkStats | null> {
   const data = await client.get<{ links?: LinkStats[] }>("links", { range: "30d" });
   return data?.links?.find((l) => l.link.slug === slug) ?? null;
