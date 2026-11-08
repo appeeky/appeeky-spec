@@ -122,11 +122,11 @@ jobs:
       - uses: appeeky/appeeky-spec@v0
 `,
   "listing-push.yml": `# Appeeky Spec: push the listing to the stores when a change is merged, and send the
-# social posts and make the UGC clips a merged pull request approved.
+# review replies and social posts, and make the UGC clips a merged pull request approved.
 on:
   push:
     branches: [main]
-    paths: ["appeeky/store/**", "appeeky.spec.yaml", "appeeky/social/drafts/**", "appeeky/ugc/briefs/**"]
+    paths: ["appeeky/store/**", "appeeky.spec.yaml", "appeeky/reviews/replies/**", "appeeky/social/drafts/**", "appeeky/ugc/briefs/**"]
 permissions:
   contents: write          # to commit the release file
 jobs:
@@ -137,6 +137,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           npx @appeeky/spec push --yes --note "\${{ github.event.head_commit.message }}"
+          npx @appeeky/spec reviews push --yes
           npx @appeeky/spec social push --yes
           npx @appeeky/spec ugc generate --yes \${FAL_KEY:+--local}
         env:
@@ -148,7 +149,7 @@ jobs:
       - run: |
           git config user.name "appeeky-spec"
           git config user.email "spec@users.noreply.github.com"
-          git add appeeky && git commit -m "Record release, posts and clips" && git push || true
+          git add appeeky && git commit -m "Record release, replies, posts and clips" && git push || true
 `,
   "listing-daily.yml": `# Appeeky Spec: record the category rank, AI visibility and Google search, measure releases on day 7 and 14, refresh reviews and competitors.
 on:

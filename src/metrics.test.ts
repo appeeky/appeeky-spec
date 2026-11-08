@@ -145,6 +145,21 @@ describe("experiments measured from metrics", () => {
     const saved = await readExperiments(root);
     expect(saved.find((e) => e.id === "hook-video")!.status).toBe("running");
   });
+
+  it("closes a smart link experiment from its link, even without other metrics", async () => {
+    const root = mkdtempSync(join(tmpdir(), "spec-metrics-"));
+    await writeSpec(root, { version: 1, app: { name: "Sleep" }, stores: { appStore: { appId: "42" } } });
+    const startedAt = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    await writeExperiment(root, { ...base, id: "fan-post", type: "other", metric: "link_installs", baseline: 0, target: 20, startedAt, link: { slug: "ab12xy" } });
+    await writeExperiment(root, { ...base, id: "other-link", type: "other", metric: "link_clicks", baseline: 0, target: 20, startedAt });
+    const asked: string[] = [];
+    const closed = await measureExperiments(await loadProject(root), null, new Date(), async (e) => {
+      asked.push(e.metric);
+      return e.link?.slug === "ab12xy" ? 31 : undefined;
+    });
+    expect(closed.map((e) => [e.id, e.status, e.result?.value])).toEqual([["fan-post", "won", 31]]);
+    expect(asked.sort()).toEqual(["link_clicks", "link_installs"]);
+  });
 });
 
 describe("verify with metrics", () => {

@@ -5,6 +5,7 @@ import { SPEC_DIR } from "./files.js";
 import { closeExperiment, dueExperiments, readExperiments, writeExperiment, type Experiment } from "./experiments.js";
 import { readReleases, releaseAge, updateRelease, type ReleaseRecord } from "./history.js";
 import type { Project, StoreId } from "./schema.js";
+import type { LinkValue } from "./attribution.js";
 import { formatChange, isMetricName, measureAround, metricAfter, outcomeVerdict, type MetricSource } from "./metrics.js";
 import { compareWithControl, MIN_NET_PLACES } from "./control.js";
 import { evaluateRanks, measureConversion, rankAppIds, type ConversionSource, type ConversionWindow, type RankSnapshot, type RankSource } from "./verify.js";
@@ -147,15 +148,18 @@ export function experimentApp(project: Project, e: Pick<Experiment, "store">): {
 /**
  * Close due experiments whose metric Appeeky can measure (conversion, revenue,
  * trials, cpa, ...): the value is the metric over the experiment's run.
+ * Smart link experiments are read from their link when `linkValue` is given.
  * Experiments on other metrics stay due for `experiment close --value`.
  */
-export async function measureExperiments(project: Project, source: MetricSource, now = new Date()): Promise<Experiment[]> {
+export async function measureExperiments(project: Project, source: MetricSource | null, now = new Date(), linkValue?: LinkValue): Promise<Experiment[]> {
   const closed: Experiment[] = [];
   for (const e of dueExperiments(await readExperiments(project.root), now)) {
     if (!isMetricName(e.metric)) continue;
-    const app = experimentApp(project, e);
-    if (!app) continue;
-    const value = await metricAfter(source, app.store, app.appId, e.metric, e.startedAt, e.checkAfterDays).catch(() => undefined);
+    let value = linkValue ? await linkValue(e).catch(() => undefined) : undefined;
+    if (value === undefined && source) {
+      const app = experimentApp(project, e);
+      if (app) value = await metricAfter(source, app.store, app.appId, e.metric, e.startedAt, e.checkAfterDays).catch(() => undefined);
+    }
     if (value === undefined) continue;
     closed.push(await writeExperiment(project.root, closeExperiment(e, value, `Measured by appeeky-spec over ${e.checkAfterDays} days.`, now)));
   }

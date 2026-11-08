@@ -211,6 +211,8 @@ describe("report", () => {
     expect(md).toContain("**2 listing fields changed**");
     expect(md).toContain("| App Store US | 50% → 50% | white noise | **rain** |");
     expect(await loadProjectAtRef(root, "does-not-exist")).toBeNull();
+    const shot = { severity: "error" as const, rule: "screenshots", store: "app-store" as const, locale: "en-US", field: "APP_IPHONE_67", message: "01.png is 100×100." };
+    expect(specReport(base, await loadProject(root), [shot])).toContain("- ❌ app-store en-US APP_IPHONE_67: 01.png is 100×100.");
   });
 });
 

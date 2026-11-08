@@ -79,7 +79,7 @@ describe("Apple Search Ads on your own key", () => {
     expect(calls.find((c) => c.url.endsWith("/1/searchterms"))!.body).toMatchObject({ timeZone: "ORTZ", groupBy: ["countryOrRegion"] });
     expect(calls.filter((c) => c.url.includes("searchads")).every((c) => c.url.endsWith("/acls") || c.org === "orgId=42")).toBe(true);
 
-    expect(readFileSync(join(root, "appeeky/search-ads/daily.csv"), "utf8")).toBe("date,spend,installs,taps,impressions,cpi\n2026-11-01,10,5,12,150,2\n");
+    expect(readFileSync(join(root, "appeeky/search-ads/daily.csv"), "utf8")).toBe("date,spend,installs,taps,impressions,cpi,currency\n2026-11-01,10,5,12,150,2,EUR\n");
     expect(readFileSync(join(root, "appeeky/search-ads/keywords.csv"), "utf8")).toContain("rain sounds,EXACT,US Exact,80,9,4,6,1.5");
     const summary = readFileSync(join(root, "appeeky/search-ads/summary.md"), "utf8");
     expect(summary).toContain("| thunder sleep sounds | 3 | 5 | 4 EUR |");
@@ -87,8 +87,10 @@ describe("Apple Search Ads on your own key", () => {
 
     const w = await searchAdsMetricSource(root)!.window("app-store", "123", "2026-11-01", "2026-11-03");
     expect(w?.values).toEqual({ ad_installs: 2.5, cpa: 2 });
+    expect(w?.currency).toBe("EUR");
     const snap = await adsSnapshot(null, project.spec, { store: "app-store", appId: "123" }, 7, new Date("2026-11-03T00:00:00Z"), searchAdsMetricSource(root));
     expect(snap.channels).toEqual([{ channel: "apple-search-ads", spendPerDay: 1.43, resultsPerDay: 0.71, costPerResult: 2, result: "installs" }]);
+    expect(snap.currency).toBe("EUR");
   });
 
   it("goes through the appstore CLI account when no ASA_* key is set", async () => {

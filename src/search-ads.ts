@@ -298,8 +298,8 @@ export async function pullSearchAds(project: Project, client: SearchAdsClient, n
   const dailyFile = join(dir, "daily.csv");
   const kept = new Map<string, string>();
   if (existsSync(dailyFile)) for (const l of (await readFile(dailyFile, "utf8")).split("\n").slice(1).filter(Boolean)) kept.set(l.split(",")[0]!, l);
-  for (const [date, d] of byDay) kept.set(date, [date, r2(d.spend), d.installs, d.taps, d.impressions, d.installs ? r2(d.spend / d.installs) : ""].join(","));
-  await writeFile(dailyFile, `date,spend,installs,taps,impressions,cpi\n${[...kept.keys()].sort().map((k) => kept.get(k)).join("\n")}${kept.size ? "\n" : ""}`);
+  for (const [date, d] of byDay) kept.set(date, [date, r2(d.spend), d.installs, d.taps, d.impressions, d.installs ? r2(d.spend / d.installs) : "", currency ?? ""].join(","));
+  await writeFile(dailyFile, `date,spend,installs,taps,impressions,cpi,currency\n${[...kept.keys()].sort().map((k) => kept.get(k)).join("\n")}${kept.size ? "\n" : ""}`);
 
   type Agg = { text: string; match?: string; campaign: string; impressions: number; taps: number; installs: number; spend: number };
   const keywords: Agg[] = [];
@@ -382,7 +382,7 @@ export async function pullSearchAds(project: Project, client: SearchAdsClient, n
 export function searchAdsMetricSource(root: string): MetricSource | null {
   const file = join(searchAdsDir(root), "daily.csv");
   if (!existsSync(file)) return null;
-  let rows: Promise<Array<{ date: string; spend: number; installs: number }>> | undefined;
+  let rows: Promise<Array<{ date: string; spend: number; installs: number; currency?: string }>> | undefined;
   return {
     label: "Apple Search Ads in the repo",
     async window(store, _appId, from, to) {
@@ -393,8 +393,8 @@ export function searchAdsMetricSource(root: string): MetricSource | null {
           .slice(1)
           .filter(Boolean)
           .map((l) => {
-            const [date, spend, installs] = l.split(",");
-            return { date: date!, spend: Number(spend), installs: Number(installs) };
+            const [date, spend, installs, , , , currency] = l.split(",");
+            return { date: date!, spend: Number(spend), installs: Number(installs), ...(currency ? { currency } : {}) };
           }),
       );
       const inside = (await rows).filter((r) => r.date >= from && r.date < to);
@@ -403,7 +403,8 @@ export function searchAdsMetricSource(root: string): MetricSource | null {
       const spend = inside.reduce((n, r) => n + r.spend, 0);
       const installs = inside.reduce((n, r) => n + r.installs, 0);
       const values: MetricWindow["values"] = { ad_installs: installs / days, ...(installs > 0 ? { cpa: spend / installs } : {}) };
-      return { from, to, days, values };
+      const currency = inside.find((r) => r.currency)?.currency ?? (await rows).find((r) => r.currency)?.currency;
+      return { from, to, days, values, ...(currency ? { currency } : {}) };
     },
   };
 }

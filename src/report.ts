@@ -6,10 +6,11 @@ import { promisify } from "node:util";
 import { projectCoverage, type StorefrontCoverage } from "./coverage.js";
 import { diffListings } from "./diff.js";
 import { loadProject, SPEC_DIR, SPEC_FILE } from "./files.js";
-import { lintProject } from "./lint.js";
+import { lintProject, type Issue } from "./lint.js";
 import { STORES, type Listing, type Project, type StoreListings } from "./schema.js";
 import { draftIssues, readAccounts, readDrafts } from "./social.js";
 import { readBriefs } from "./ugc.js";
+import { readReplies, replyIssues } from "./reviews.js";
 
 const run = promisify(execFile);
 
@@ -39,7 +40,8 @@ const key = (r: StorefrontCoverage) => `${r.store}:${r.country}`;
 const label = (r: StorefrontCoverage) => `${r.store === "app-store" ? "App Store" : "Google Play"} ${r.country.toUpperCase()}`;
 
 /** Markdown for a pull request: listing changes, check results and coverage before → after. */
-export function specReport(base: Project | null, head: Project): string {
+/** `screenshots`: issues from `checkScreenshots`, reported with the listing check. */
+export function specReport(base: Project | null, head: Project, screenshots: Issue[] = []): string {
   const out: string[] = ["## Appeeky Spec"];
 
   const changes = STORES.flatMap((store) =>
@@ -53,7 +55,7 @@ export function specReport(base: Project | null, head: Project): string {
     }
   }
 
-  const issues = lintProject(head).filter((i) => i.severity !== "info");
+  const issues = [...lintProject(head), ...screenshots].filter((i) => i.severity !== "info");
   const errors = issues.filter((i) => i.severity === "error").length;
   out.push("", `**Check:** ${errors} error${errors === 1 ? "" : "s"}, ${issues.length - errors} warning${issues.length - errors === 1 ? "" : "s"}`);
   for (const i of issues.slice(0, 20)) out.push(`- ${i.severity === "error" ? "❌" : "⚠️"} ${i.store} ${i.locale}${i.field ? ` ${i.field}` : ""}: ${i.message}`);
@@ -79,12 +81,22 @@ export function specReport(base: Project | null, head: Project): string {
 const cell = (s: string, n = 90) => s.replace(/\n+/g, " ").replace(/\|/g, "\\|").slice(0, n);
 
 /**
- * The posts and clips a merge sends out: social drafts and UGC briefs still marked draft, so a
+ * What a merge sends out: review replies, social drafts and UGC briefs still marked draft, so a
  * reviewer sees them next to the listing change. Empty when there are none.
  */
 export async function outboxReport(root: string, now = new Date()): Promise<string> {
   const out: string[] = [];
   const rel = (f: string) => relative(root, f);
+  try {
+    const replies = (await readReplies(root)).filter((r) => r.status === "draft");
+    if (replies.length > 0) {
+      out.push("", `**${replies.length} review repl${replies.length === 1 ? "y goes" : "ies go"} out on merge**`, "", "| Reply | Store | Review | Text |", "| --- | --- | --- | --- |");
+      for (const r of replies) out.push(`| ${rel(r.file)} | ${r.store} | ${cell(r.review ?? "", 60)} | ${cell(r.text)} |`);
+      for (const r of replies) for (const issue of replyIssues(r)) out.push(`- ⚠️ ${rel(r.file)}: too long, ${issue}`);
+    }
+  } catch (err) {
+    out.push("", `- ❌ Review replies: ${(err as Error).message}`);
+  }
   try {
     const drafts = (await readDrafts(root)).filter((d) => d.status === "draft");
     if (drafts.length > 0) {

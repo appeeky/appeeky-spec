@@ -39,7 +39,7 @@ SPEC_DIR="${SPEC_DIR:-.}"
 TAG="appeeky-spec/pushed"
 LISTING="appeeky/store appeeky.spec.yaml"
 # Social posts and UGC briefs approved by a merged pull request.
-OUTBOX="appeeky/social/drafts appeeky/ugc/briefs"
+OUTBOX="appeeky/reviews/replies appeeky/social/drafts appeeky/ugc/briefs"
 
 log() { echo "[appeeky-spec $MODE] $*"; }
 
@@ -127,7 +127,7 @@ case "$MODE" in
     fi
     last="$(git rev-parse "refs/tags/$TAG^{commit}")"
     if [ "$last" = "$(git rev-parse HEAD)" ]; then log "Up to date."; exit 0; fi
-    # Posts and clips a merged pull request approved: only drafts still marked draft are sent.
+    # Replies, posts and clips a merged pull request approved: only drafts still marked draft are sent.
     # shellcheck disable=SC2086
     if ! git diff --quiet "$last" HEAD -- $OUTBOX; then
       # With FAL_KEY set, clips render here on your own fal account instead of with Appeeky credits.
@@ -136,9 +136,10 @@ case "$MODE" in
         appeeky-spec social check || true
         appeeky-spec ugc generate $ugc_where --dry-run || true
       else
+        appeeky-spec reviews push --yes || log "Some replies were not sent (see above)."
         appeeky-spec social push --yes || log "Some posts were not sent (see above)."
         appeeky-spec ugc generate $ugc_where --yes || log "Some clips were not made (see above)."
-        save "Record sent posts and clips"
+        save "Record sent replies, posts and clips"
       fi
     fi
     # shellcheck disable=SC2086

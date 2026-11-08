@@ -127,7 +127,13 @@ describe("report", () => {
     writeFileSync(join(root, "appeeky/social/drafts/fan.yaml"), YAML.stringify({ accounts: ["instagram"], text: "Fan | sounds" }));
     writeFileSync(join(root, "appeeky/social/drafts/old.yaml"), YAML.stringify({ accounts: ["twitter"], text: "Sent", status: "sent" }));
     writeFileSync(join(root, "appeeky/ugc/briefs/hook.yaml"), YAML.stringify({ persona: "Maya", script: "Out in ten minutes." }));
+    mkdirSync(join(root, "appeeky/reviews/replies"), { recursive: true });
+    writeFileSync(join(root, "appeeky/reviews/replies/google-play-r1.yaml"), YAML.stringify({ id: "r1", store: "google-play", review: "Stops after an hour", text: "x".repeat(400) }));
+    writeFileSync(join(root, "appeeky/reviews/replies/app-store-r2.yaml"), YAML.stringify({ id: "r2", store: "app-store", text: "Thanks", status: "sent" }));
     const md = await outboxReport(root, new Date("2026-11-08T00:00:00Z"));
+    expect(md).toContain("**1 review reply goes out on merge**");
+    expect(md).toContain("| appeeky/reviews/replies/google-play-r1.yaml | google-play | Stops after an hour |");
+    expect(md).toContain("- ⚠️ appeeky/reviews/replies/google-play-r1.yaml: too long, 400/350 characters");
     expect(md).toContain("**1 post goes out on merge**");
     expect(md).toContain("| appeeky/social/drafts/fan.yaml | instagram | on merge | Fan \\| sounds |");
     expect(md).toContain("- ⚠️ appeeky/social/drafts/fan.yaml: instagram needs an image or video (media:)");
