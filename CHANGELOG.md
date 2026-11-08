@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-08)
 
 - `search-ads pull`: Apple Search Ads on your own API key, no Appeeky account. The key lives on your App Store Connect CLI account next to the App Store Connect key (`appstore accounts search-ads`), and Spec calls Apple through `appstore search-ads call`; in CI, `ASA_CLIENT_ID`, `ASA_TEAM_ID`, `ASA_KEY_ID` and `ASA_PRIVATE_KEY` work instead. Reads the campaigns for the App Store app (`stores.appStore.searchAds` picks the org and campaigns) and writes spend, installs, taps and impressions per day, keywords, search terms and `summary.md` (search terms that installed and are not targets, keywords that spent and brought nothing) to `appeeky/search-ads/`. `ads` and `verify` read it. The daily routines pull it when the key is set.
 - `seo pull` also works with a gcloud application-default login on your own machine.
