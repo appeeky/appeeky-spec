@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2026-11-10)
+
+### Features
+
+- guided init makes the app's folder, shows progress and hands over to your coding agent (#3) ([6e9885e](https://github.com/appeeky/appeeky-spec/commit/6e9885e891e238ee6906b83ddf6f4753166b284f))
+
 ## 0.2.1 (2026-11-08)
 
 ### Fixes
