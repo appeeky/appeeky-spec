@@ -11,6 +11,7 @@ export const c = {
   green: wrap(32),
   yellow: wrap(33),
   cyan: wrap(36),
+  badge: (s: string) => badge(s),
 };
 
 export function printJson(value: unknown): void {
@@ -84,3 +85,34 @@ export function formatCoverage(reports: StorefrontCoverage[]): string {
   }
   return out.join("\n").trimEnd();
 }
+
+const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/**
+ * Show a spinner while `task` runs, in a terminal only. Lines the task logs print above the
+ * spinner, so a command that reports as it goes still reads cleanly. Never wrap a prompt.
+ */
+export async function spin<T>(label: string, task: () => Promise<T>): Promise<T> {
+  if (!process.stdout.isTTY || process.env.CI) return task();
+  let i = 0;
+  const draw = () => process.stdout.write(`\r\u001b[2K  ${c.cyan(FRAMES[i++ % FRAMES.length]!)} ${c.dim(label)}`);
+  const clear = () => process.stdout.write("\r\u001b[2K");
+  const log = console.log;
+  console.log = (...args: unknown[]) => {
+    clear();
+    log(...args);
+    draw();
+  };
+  draw();
+  const timer = setInterval(draw, 80);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
+    console.log = log;
+    clear();
+  }
+}
+
+/** White on cyan, for the setup's title. */
+export const badge = (s: string) => (useColor ? `\u001b[46m\u001b[30m${s}\u001b[0m` : s);
