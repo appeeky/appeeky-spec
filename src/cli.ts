@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
+import * as p from "@clack/prompts";
 import { Command, Option } from "commander";
 import { adsSnapshot, CHANNEL_LABELS, saveAdsSnapshot } from "./ads.js";
 import { COFOUNDER_COMMAND, installAgents, parseTargets, TARGET_DIRS, type InstalledFile } from "./agents.js";
@@ -37,7 +38,8 @@ import { readReleases, releaseId, releaseMarkdown, writeRelease } from "./histor
 import { freeStores, writeLoops, type Loop } from "./loops.js";
 import { diagnose, findApps, playPackageExists, suggestTargets, targetCandidates, WORKFLOWS, type DoctorCheck } from "./setup.js";
 import { hasErrors, lintProject } from "./lint.js";
-import { c, formatChanges, formatCoverage, formatIssues, printJson, storeLabel } from "./output.js";
+import { c, formatChanges, formatCoverage, formatIssues, printJson, spin, storeLabel } from "./output.js";
+import { CODING_AGENTS, onPath, runQuiet, setupPrompt, type CodingAgent } from "./coding-agents.js";
 import { configuredStores, planStore, storeHandle, type StorePlan } from "./project.js";
 import { STORES, type Listing, type Project, type SpecFileInput, type StoreId, type TransportMode } from "./schema.js";
 
@@ -74,6 +76,33 @@ async function ask(question: string, fallback = ""): Promise<string> {
   const answer = await rl.question(`${question}${fallback ? c.dim(` (${fallback})`) : ""} `);
   rl.close();
   return answer.trim() || fallback;
+}
+
+/** End the setup cleanly on Ctrl+C or Esc. */
+function need<T>(value: T): Exclude<T, symbol> {
+  if (p.isCancel(value)) {
+    p.cancel("Setup stopped. Run it again any time.");
+    process.exit(0);
+  }
+  return value as Exclude<T, symbol>;
+}
+
+/** A text prompt; Enter gives `defaultValue` when there is one. */
+async function textQ(message: string, opts: { placeholder?: string; defaultValue?: string; validate?: (v: string | undefined) => string | undefined } = {}): Promise<string> {
+  return (need(await p.text({ message, ...opts })) ?? "").trim();
+}
+
+/** Run something that logs, keeping its lines to show them once it is done. */
+async function captured(task: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+  try {
+    await task();
+  } finally {
+    console.log = log;
+  }
+  return lines;
 }
 
 /** A yes/no question that defaults to yes. */
@@ -180,47 +209,76 @@ export function buildProgram(): Command {
     });
 
   /**
-   * The guided setup: find the app, write the spec, check that the stores can be reached and
-   * pull, suggest targets from what it already ranks for, add CI and the agent skills, and
-   * end on the first coverage table.
+   * The guided setup: find the app, make its folder and write the spec, check that the stores
+   * can be reached and pull, suggest targets from what it already ranks for, show coverage, then
+   * install the skills for the user's coding agent and hand the rest over to it.
    */
-  async function wizard(root: string, locale: string, country: string) {
-    const step = (n: number, title: string) => console.log(`\n${c.bold(`${n}/6`)} ${title}`);
-    console.log(c.bold("Appeeky Spec setup") + c.dim("  Enter keeps the suggestion in brackets."));
+  async function wizard(cwd: string, locale: string, country: string) {
+    p.intro(c.badge(" Appeeky Spec "));
 
-    step(1, "Your app");
-    const term = await ask("What is it called on the App Store?");
-    const found = term ? await findApps(term, country).catch(() => []) : [];
+    // 1. The app
+    const term = await textQ("What is your app called on the App Store?", { validate: (v) => (v?.trim() ? undefined : "Type the app's name") });
+    const s = p.spinner();
+    s.start("Searching the App Store");
+    const found = await findApps(term, country).catch(() => []);
+    s.stop(found.length ? `Found ${found.length} ${found.length === 1 ? "app" : "apps"}` : "Not on the App Store in this country");
     let appStore: string | undefined;
-    let name = term || "My App";
+    let name = term;
     let storeName = term;
     let bundleId = "";
     if (found.length) {
-      found.forEach((app, i) => console.log(`  ${c.cyan(String(i + 1))}  ${app.name}  ${c.dim(`${app.developer}${app.rating ? ` · ${app.rating}★` : ""} · ${app.id}`)}`));
-      console.log(`  ${c.cyan("0")}  ${c.dim("None of these / not on the App Store")}`);
-      const pick = Number(await ask("Which one?", "1"));
-      const app = found[pick - 1];
+      const pick = need(
+        await p.select({
+          message: "Which one is yours?",
+          options: [
+            ...found.map((app) => ({ value: app.id, label: app.name, hint: `${app.developer}${app.rating ? ` · ${app.rating}★` : ""} · ${app.id}` })),
+            { value: "", label: "None of these" },
+          ],
+        }),
+      );
+      const app = found.find((a) => a.id === pick);
       if (app) {
         appStore = app.id;
         name = app.name.split(/[:\-–—|]/)[0]!.trim() || app.name;
         storeName = app.name;
         bundleId = app.bundleId;
       }
-    } else if (term) console.log(c.dim("  Not found on the App Store in this country."));
+    }
     if (!appStore) {
-      const id = await ask("App Store id (digits), or Enter to skip:");
-      if (/^\d{5,}$/.test(id)) appStore = id;
+      const id = await textQ("App Store id (digits)", { placeholder: "Enter to skip", defaultValue: "", validate: (v) => (!v || /^\d{5,}$/.test(v.trim()) ? undefined : "Digits only, like 6763859497") });
+      if (id) appStore = id.trim();
     }
     let googlePlay: string | undefined;
-    const pkg = await ask("Google Play package, or - for none:", bundleId || "-");
-    if (pkg && pkg !== "-") {
+    if (need(await p.confirm({ message: "Is it on Google Play too?", initialValue: false }))) {
+      const pkg = await textQ("Google Play package", { placeholder: bundleId || "com.example.app", defaultValue: bundleId, validate: (v) => (v?.trim() || bundleId ? undefined : "Type the package name") });
+      s.start("Checking Google Play");
       const live = await playPackageExists(pkg);
-      console.log(live ? `  ${c.green("✓")} found on Google Play` : `  ${c.yellow("!")} no public Google Play page for ${pkg}: kept, check the name`);
+      s.stop(live ? `${pkg} is on Google Play` : c.yellow(`No public Google Play page for ${pkg}: kept, check the name`));
       googlePlay = pkg;
     }
-    if (!appStore && !googlePlay) throw new Error("Give an App Store id or a Google Play package to set up the spec.");
+    if (!appStore && !googlePlay) {
+      p.cancel("Give an App Store id or a Google Play package to set up the spec.");
+      process.exitCode = 1;
+      return;
+    }
 
-    step(2, "The spec");
+    // 2. The folder and the spec. Inside an app's repo the spec goes next to the code; anywhere else it gets a folder of its own.
+    const inProject = [".git", "package.json", "app.json", "pubspec.yaml"].some((f) => existsSync(join(cwd, f)));
+    const suggested = inProject ? "." : `./${slug(name)}`;
+    const folder = await textQ("Where should the spec live?", { placeholder: suggested, defaultValue: suggested });
+    const root = resolve(cwd, folder);
+    const cdHint = folder === "." ? "" : `cd ${folder.replace(/^\.\//, "")}`;
+    if (existsSync(join(root, SPEC_FILE))) {
+      p.cancel(`${SPEC_FILE} already exists in ${root}. Run \`appeeky-spec doctor\` there to see what is set up.`);
+      process.exitCode = 1;
+      return;
+    }
+    // Subcommands parse the global options again, so each one is told the folder.
+    const sub = (args: string[]) => program.parseAsync(["-C", root, ...args], { from: "user" });
+    await mkdir(root, { recursive: true });
+    program.setOptionValue("cwd", root);
+    const created: string[] = [];
+    if (!existsSync(join(root, ".git")) && !inProject && (await runQuiet("git", ["init", "-q"], root)).code === 0) created.push("a new git repo");
     await writeSpec(root, {
       version: 1,
       app: { name, primaryLocale: locale },
@@ -232,78 +290,119 @@ export function buildProgram(): Command {
     });
     await mkdir(join(root, SPEC_DIR, "store"), { recursive: true });
     if (!existsSync(join(root, SPEC_DIR, "playbook.md"))) await writeFile(join(root, SPEC_DIR, "playbook.md"), PLAYBOOK);
-    const ignored = await ignoreLocalData(root);
-    console.log(`  ${c.green("✓")} ${SPEC_FILE}, ${SPEC_DIR}/playbook.md${ignored ? ", .appeeky/ in .gitignore" : ""}`);
+    created.push(SPEC_FILE, `${SPEC_DIR}/playbook.md`);
+    if (await ignoreLocalData(root)) created.push(".appeeky/ in .gitignore");
+    p.log.success(`${c.bold(folder)}  ${c.dim(created.join(", "))}`);
+    if (existsSync(join(root, ".git")) && need(await p.confirm({ message: "Add GitHub Actions? (pull request check, push on merge, daily verify)" }))) {
+      const written = await writeWorkflows(root);
+      p.log.success(`${written.join(", ")}\n${c.dim("The push and the daily run need APPEEKY_API_KEY (or your store keys) as repository secrets.")}`);
+    }
 
-    step(3, "Store access and your live listing");
+    // 3. Store access and the live listing
     let project = await load();
-    let reach = diagnose(root, project).filter((x) => x.area === "App Store" || x.area === "Google Play");
-    printChecks(reach);
+    const reachOf = () => diagnose(root, project).filter((x) => x.area === "App Store" || x.area === "Google Play");
+    let reach = reachOf();
+    logChecks(reach);
     // A store that cannot be reached: offer to save the user's own key with the store CLI, once per machine.
     let saved = false;
     for (const x of reach.filter((r) => r.status === "fail")) {
       const store: StoreId = x.area === "App Store" ? "app-store" : "google-play";
-      if (!(await agree(`Save your own ${x.area} key on this machine now?`))) continue;
+      if (!need(await p.confirm({ message: `Save your ${x.area} key on this machine now?`, initialValue: true }))) continue;
       saved = (await saveStoreKey(store, slug(name), store === "app-store" ? appStore : googlePlay)) || saved;
     }
     if (saved) {
-      reach = diagnose(root, project).filter((x) => x.area === "App Store" || x.area === "Google Play");
-      printChecks(reach);
+      reach = reachOf();
+      logChecks(reach);
     }
     let pulled = false;
     // Pull each store that can be reached, one at a time: one store's problem does not stop the other.
-    const reachable = reach.filter((x) => x.status === "ok").map((x) => (x.area === "App Store" ? "app-store" : "google-play"));
-    if (reachable.length && (await agree(`Pull your live listing from ${reachable.map((s) => storeLabel(s as StoreId)).join(" and ")} now?`))) {
+    const reachable = reach.filter((x) => x.status === "ok").map((x) => (x.area === "App Store" ? "app-store" : "google-play") as StoreId);
+    if (reachable.length && need(await p.confirm({ message: `Pull your live listing from ${reachable.map(storeLabel).join(" and ")} now?` }))) {
       for (const store of reachable) {
+        s.start(`Pulling your ${storeLabel(store)} listing`);
         try {
-          await program.parseAsync(["pull", "--store", store], { from: "user" });
+          const lines = await captured(() => sub(["pull", "--store", store]));
+          s.stop(`Pulled your ${storeLabel(store)} listing`);
+          if (lines.length) p.log.message(lines.join("\n"));
           pulled = true;
         } catch (e) {
-          console.log(`  ${c.red("✗")} ${(e as Error).message}`);
+          s.error(`${storeLabel(store)}: ${(e as Error).message}`);
         }
       }
     }
-    if (reachable.length < reach.length) console.log(c.dim("  Set up access for the rest as above, then run `appeeky-spec pull`."));
+    if (reachable.length < reach.length) p.log.info(c.dim("Your agent can walk you through store access at the end."));
 
-    step(4, `The searches to win in ${country.toUpperCase()}`);
+    // 4. Targets
     project = await load();
     // Without a pulled listing, the App Store name still says what the app is for.
     const candidates = targetCandidates(project, 14, storeName);
-    const ranked = await suggestTargets(candidates, appStore, country, itunesRankSource());
+    s.start(`Checking where ${name} ranks for ${candidates.length} ${candidates.length === 1 ? "search" : "searches"} in ${country.toUpperCase()}`);
+    const ranked = await suggestTargets(candidates, appStore, country, itunesRankSource()).catch(() => []);
+    s.stop(ranked.length ? `Searches to win in ${country.toUpperCase()}` : "No ranked searches found yet");
     let targets: string[] = [];
     if (ranked.length) {
-      for (const r of ranked) console.log(`  ${r.keyword.padEnd(24)} ${r.rank ? c.green(`#${r.rank}`) : c.dim("not in the top 200")}`);
-      const answer = await ask("Keep these? Enter for yes, or type your own, comma separated:", "yes");
-      targets = answer === "yes" ? ranked.map((r) => r.keyword) : answer.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-    } else {
-      const answer = await ask("Type 3 to 5 searches people use to find apps like yours, comma separated:");
-      targets = answer.split(",").map((x) => x.trim().toLowerCase()).filter((x) => x && !/^(y|yes)$/.test(x));
+      const picked = need(
+        await p.multiselect({
+          message: "Which searches should the listing win?",
+          options: ranked.map((r) => ({ value: r.keyword, label: r.keyword, hint: r.rank ? `#${r.rank}` : "not in the top 200" })),
+          initialValues: ranked.map((r) => r.keyword),
+          required: false,
+        }),
+      );
+      targets = picked as string[];
     }
+    const extra = await textQ(targets.length ? "Any more? Comma separated" : "Type 3 to 5 searches people use to find apps like yours, comma separated", { placeholder: "Enter to skip", defaultValue: "" });
+    targets = [...new Set([...targets, ...extra.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)])];
     if (targets.length) {
       project.spec.targets[country] = targets;
       await writeSpec(root, project.spec);
-      console.log(`  ${c.green("✓")} ${targets.length} ${targets.length === 1 ? "target" : "targets"} in ${SPEC_FILE}`);
+      p.log.success(`${targets.length} ${targets.length === 1 ? "target" : "targets"} in ${SPEC_FILE}`);
     }
 
-    step(5, "Automation");
-    if (existsSync(join(root, ".git")) && (await agree("Add GitHub Actions (pull request check, push on merge, daily verify)?"))) {
-      for (const f of await writeWorkflows(root)) console.log(`  ${c.green("✓")} ${f}`);
-      console.log(c.dim("  The push and the daily run need APPEEKY_API_KEY (or your store keys) as repository secrets."));
-    }
-    if (await agree("Install the agent skills (npx skills add appeeky/appeeky-spec)?")) {
-      const result = spawnSync("npx", ["-y", "skills", "add", "appeeky/appeeky-spec"], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
-      if (result.status !== 0) console.log(c.yellow("  The skills did not install. Run `npx skills add appeeky/appeeky-spec` later."));
-    }
-    if (await agree(`Add the specialist agents and the /${COFOUNDER_COMMAND} review for Claude Code?`)) {
-      printInstalled(await installAgents(root, ["claude"]));
-      console.log(c.dim(`  In Claude Code, run /${COFOUNDER_COMMAND} for a growth review. Other agents: \`appeeky-spec agents install --for opencode\`.`));
+    // 5. Where the listing stands
+    if (pulled && targets.length) {
+      s.start("Measuring keyword coverage");
+      const lines = await captured(() => sub(["coverage", "--country", country])).catch((e: Error) => [c.red(e.message)]);
+      s.stop("Keyword coverage");
+      p.log.message(lines.join("\n"));
     }
 
-    step(6, "Where you stand");
-    if (pulled && targets.length) await program.parseAsync(["coverage", "--country", country], { from: "user" });
-    else console.log(c.dim("  Pull the listing and add targets, then `appeeky-spec coverage` shows which searches it covers."));
-    console.log(`\n${c.bold("Next")}: change a listing file (or ask your agent), then ${c.cyan("appeeky-spec diff")} and ${c.cyan('appeeky-spec push --note "why"')}.`);
-    console.log(c.dim("Run `appeeky-spec doctor` any time to see what is set up and what is missing."));
+    // 6. The coding agent: skills, specialists, then hand over
+    const agent = await pickAgent();
+    if (!agent) {
+      p.note(`${cdHint ? `${cdHint}\n` : ""}npx skills add appeeky/appeeky-spec\nthen ask your agent to finish the setup`, "Later");
+      p.outro(`Done. ${c.dim("`appeeky-spec doctor` shows what is set up and what is missing.")}`);
+      return;
+    }
+    s.start(`Installing the Appeeky Spec skills for ${agent.label}`);
+    const skills = await runQuiet("npx", ["-y", "skills", "add", "appeeky/appeeky-spec", "--agent", agent.skills, "--skill", "*", "--yes"], root);
+    if (skills.code === 0) s.stop(`Skills installed for ${agent.label}`);
+    else s.error(`The skills did not install. Run \`npx skills add appeeky/appeeky-spec\` in ${folder} later.`);
+    if (agent.subagents) {
+      const files = await installAgents(root, [agent.subagents]);
+      p.log.success(`Specialists: ${files.map((f) => f.path.split("/").pop()!.replace(/\.md$/, "")).join(", ")}${agent.subagents === "claude" ? c.dim(`\n/${COFOUNDER_COMMAND} runs a growth review with them.`) : ""}`);
+    }
+    const prompt = setupPrompt({ name, pulled, hasTargets: targets.length > 0 });
+    const installed = onPath(agent.bin);
+    if (installed && need(await p.confirm({ message: `Open ${agent.label} here to finish the setup?` }))) {
+      p.outro(`Starting ${c.cyan(agent.bin)} in ${folder}`);
+      spawnSync(agent.bin, agent.launch(prompt), { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
+      return;
+    }
+    p.note(`${cdHint ? `${cdHint}\n` : ""}${installed ? agent.bin : `install ${agent.label}, then start it`}\n\n${c.dim(prompt)}`, "Finish with your agent");
+    p.outro("Done.");
+  }
+
+  /** Ask which coding agent the user works with; installed ones come first. */
+  async function pickAgent(): Promise<CodingAgent | undefined> {
+    const list = [...CODING_AGENTS].sort((a, b) => Number(onPath(b.bin)) - Number(onPath(a.bin)));
+    const id = need(
+      await p.select({
+        message: "Which coding agent do you use?",
+        options: [...list.map((a) => ({ value: a.id, label: a.label, hint: onPath(a.bin) ? undefined : "not installed" })), { value: "", label: "None / later" }],
+      }),
+    );
+    return list.find((a) => a.id === id);
   }
 
   /**
@@ -312,27 +411,39 @@ export function buildProgram(): Command {
    */
   async function saveStoreKey(store: StoreId, account: string, appId?: string): Promise<boolean> {
     const cli = STORE_CLIS[store];
+    const fileExists = (v: string | undefined) => (v?.trim() && existsSync(resolve(v.trim().replace(/^~(?=\/)/, process.env.HOME ?? "~"))) ? undefined : "No file at that path");
+    const filePath = (v: string) => resolve(v.trim().replace(/^~(?=\/)/, process.env.HOME ?? "~"));
     let args: string[];
     if (store === "app-store") {
-      console.log(c.dim("  App Store Connect → Users and Access → Integrations → App Store Connect API. Role App Manager to push."));
-      const keyId = await ask("  Key ID:");
-      const issuer = await ask("  Issuer ID (Enter for an individual key):");
-      const path = await ask("  Path to the AuthKey_….p8 file:");
-      if (!keyId || !path) return false;
-      args = ["accounts", "add", account, "--key-id", keyId, ...(issuer ? ["--issuer-id", issuer] : []), "--private-key-path", path, ...(appId ? ["--default-app", appId] : []), "--default"];
+      p.log.info(c.dim("App Store Connect → Users and Access → Integrations → App Store Connect API. Role App Manager to push."));
+      const keyId = await textQ("Key ID", { validate: (v) => (/^[A-Z0-9]{10}$/.test(v?.trim() ?? "") ? undefined : "10 letters and digits, like 2X9R4HXF34") });
+      const issuer = await textQ("Issuer ID", { placeholder: "Enter for an individual key", defaultValue: "", validate: (v) => (!v || /^[0-9a-f-]{36}$/i.test(v.trim()) ? undefined : "A UUID, like 57246542-96fe-1a63-e053-0824d011072a") });
+      const path = await textQ("Path to the AuthKey_….p8 file", { validate: fileExists });
+      args = ["accounts", "add", account, "--key-id", keyId.trim(), ...(issuer ? ["--issuer-id", issuer.trim()] : []), "--private-key-path", filePath(path), ...(appId ? ["--default-app", appId] : []), "--default"];
     } else {
-      console.log(c.dim("  A Google Cloud service account with the Android Publisher API, invited in Play Console → Users and permissions."));
-      const path = await ask("  Path to its JSON key:");
-      if (!path) return false;
-      args = ["accounts", "add", account, "--credentials", path, ...(appId ? ["--default-package", appId] : []), "--default"];
+      p.log.info(c.dim("A Google Cloud service account with the Android Publisher API, invited in Play Console → Users and permissions."));
+      const path = await textQ("Path to its JSON key", { validate: fileExists });
+      args = ["accounts", "add", account, "--credentials", filePath(path), ...(appId ? ["--default-package", appId] : []), "--default"];
     }
-    const result = spawnSync("npx", ["-y", "-p", cli.npmPackage, cli.bin, ...args], { stdio: "inherit", shell: process.platform === "win32" });
-    if (result.status === 0) {
-      console.log(`  ${c.green("✓")} saved as "${account}" in the ${cli.bin} CLI's config (not in this repo)`);
+    const s = p.spinner();
+    s.start(`Saving the key with the ${cli.bin} CLI`);
+    const result = await runQuiet("npx", ["-y", "-p", cli.npmPackage, cli.bin, ...args], process.cwd());
+    if (result.code === 0) {
+      s.stop(`Saved as "${account}" in the ${cli.bin} CLI's config (not in this repo)`);
       return true;
     }
-    console.log(`  ${c.red("✗")} ${cli.bin} accounts add failed: run it again later with the command above.`);
+    s.error(`${cli.bin} accounts add failed`);
+    p.log.message(c.dim(result.output.trim().split("\n").slice(-4).join("\n")));
     return false;
+  }
+
+  function logChecks(checks: DoctorCheck[]) {
+    for (const x of checks) {
+      const line = `${c.bold(x.area)}  ${x.detail}${x.fix && x.status !== "ok" ? `\n${c.dim(x.fix)}` : ""}`;
+      if (x.status === "ok") p.log.success(line);
+      else if (x.status === "warn") p.log.warn(line);
+      else p.log.error(line);
+    }
   }
 
   function printChecks(checks: DoctorCheck[]) {
