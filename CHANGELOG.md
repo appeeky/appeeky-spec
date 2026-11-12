@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 (2026-11-12)
+
+### Features
+
+- **social:** TikTok post options, accounts by handle, native posts and comments in pull (#4) ([f88ab4f](https://github.com/appeeky/appeeky-spec/commit/f88ab4f0212106f3c14f7348dbdef668a3c11c57))
+
 ## 0.3.0 (2026-11-10)
 
 ### Features
