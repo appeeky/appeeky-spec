@@ -26,6 +26,20 @@ export interface KeywordMetric {
 
 type Fetcher = typeof fetch;
 
+/** An error answer from the Appeeky API, with its HTTP status and error code, so callers can tell "not there" from "failed". */
+export class AppeekyApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "AppeekyApiError";
+  }
+}
+
+type ErrorBody = { error?: { message?: string; code?: string } } | null;
+
 /**
  * Small client for the Appeeky API (market data for ASO). Needs an API key
  * from appeeky.com; every command that uses it also works without it.
@@ -47,10 +61,10 @@ export class AppeekyApi {
     const url = new URL(this.base + path);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
     const res = await this.fetcher(url, { headers: { "X-API-Key": this.apiKey, "User-Agent": "appeeky-spec" } });
-    const body = (await res.json().catch(() => null)) as { data?: T; error?: { message?: string } } | null;
+    const body = (await res.json().catch(() => null)) as ({ data?: T } & ErrorBody) | null;
     if (!res.ok) {
       const retry = res.headers.get("retry-after");
-      throw new Error(`Appeeky API ${path}: ${body?.error?.message ?? `HTTP ${res.status}`}${retry ? ` (retry after ${retry}s)` : ""}`);
+      throw new AppeekyApiError(`Appeeky API ${path}: ${body?.error?.message ?? `HTTP ${res.status}`}${retry ? ` (retry after ${retry}s)` : ""}`, res.status, body?.error?.code);
     }
     return body?.data as T;
   }
@@ -61,8 +75,8 @@ export class AppeekyApi {
       headers: { "X-API-Key": this.apiKey, "Content-Type": "application/json", "User-Agent": "appeeky-spec" },
       body: JSON.stringify(body),
     });
-    const json = (await res.json().catch(() => null)) as { data?: T; error?: { message?: string } } | null;
-    if (!res.ok) throw new Error(`Appeeky API ${path}: ${json?.error?.message ?? `HTTP ${res.status}`}`);
+    const json = (await res.json().catch(() => null)) as ({ data?: T } & ErrorBody) | null;
+    if (!res.ok) throw new AppeekyApiError(`Appeeky API ${path}: ${json?.error?.message ?? `HTTP ${res.status}`}`, res.status, json?.error?.code);
     return json?.data as T;
   }
 
@@ -73,8 +87,8 @@ export class AppeekyApi {
       headers: { "X-API-Key": this.apiKey, "User-Agent": "appeeky-spec", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const json = (await res.json().catch(() => null)) as { data?: T; error?: { message?: string } } | null;
-    if (!res.ok) throw new Error(`Appeeky API ${path}: ${json?.error?.message ?? `HTTP ${res.status}`}`);
+    const json = (await res.json().catch(() => null)) as ({ data?: T } & ErrorBody) | null;
+    if (!res.ok) throw new AppeekyApiError(`Appeeky API ${path}: ${json?.error?.message ?? `HTTP ${res.status}`}`, res.status, json?.error?.code);
     return json?.data as T;
   }
 

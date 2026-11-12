@@ -862,7 +862,7 @@ export function buildProgram(): Command {
   const social = program.command("social").description("Organic social media in the repo: accounts, posts and their results, and posts sent through a pull request (needs APPEEKY_API_KEY)");
   social
     .command("pull")
-    .description("Write the connected accounts, recent posts and their analytics to appeeky/social/, and summary.md")
+    .description("Write the connected accounts, recent posts and their analytics, posts made in the platform apps, comments and followers to appeeky/social/, and summary.md")
     .option("--limit <n>", "How many recent posts", "100")
     .action(async (opts: { limit: string }) => {
       const project = await load();
@@ -871,17 +871,20 @@ export function buildProgram(): Command {
       const data = await fetchSocial(a, { limit: Number(opts.limit) || 100 });
       await saveSocial(project.root, data);
       if (g().json) {
-        printJson({ accounts: data.accounts.length, posts: data.posts.length });
+        printJson({ accounts: data.accounts.length, posts: data.posts.length, nativePosts: data.nativePosts?.length ?? null, comments: data.comments?.length ?? null, insights: data.insights?.length ?? null, warnings: data.warnings ?? [] });
         return;
       }
       console.log(`${c.bold("Accounts")} ${data.accounts.map((x) => `${x.platform} (${x.name})`).join(", ") || c.dim("none connected")}`);
-      console.log(`${c.bold("Posts")}    ${data.posts.length} · ${data.posts.filter((p) => p.platforms.some((x) => x.publishedAt)).length} published`);
-      console.log(c.dim("Written to appeeky/social/: accounts.yaml, posts.jsonl, summary.md."));
+      console.log(`${c.bold("Posts")}    ${data.posts.length} through Appeeky · ${data.posts.filter((p) => p.platforms.some((x) => x.publishedAt)).length} published${data.nativePosts ? ` · ${data.nativePosts.length} made in the apps` : ""}`);
+      if (data.comments) console.log(`${c.bold("Comments")} ${data.comments.length}`);
+      for (const w of data.warnings ?? []) console.log(`${c.yellow("warn ")} ${w}`);
+      const files = ["accounts.yaml", "posts.jsonl", data.nativePosts && "native-posts.jsonl", data.comments && "comments.jsonl", data.insights && "insights.yaml", "summary.md"].filter(Boolean);
+      console.log(c.dim(`Written to appeeky/social/: ${files.join(", ")}.`));
     });
 
   social
     .command("check")
-    .description("Check the drafts in appeeky/social/drafts/: connected accounts, length, media, time")
+    .description("Check the drafts in appeeky/social/drafts/: which account each goes to, length, media, TikTok options, time")
     .action(async () => {
       const project = await load();
       const accounts = await readAccounts(project.root);
