@@ -79,8 +79,8 @@ npx @appeeky/spec experiment close <id> --value 3.1 --note "Hook B: 3.1 installs
 
 With accounts and creator personas set up in Appeeky (`APPEEKY_API_KEY`):
 
-- `social pull` writes the connected accounts, recent posts and how each did to `appeeky/social/` (read `summary.md`). `ugc pull` writes the personas (`ready` when they can make clips) and their clips to `appeeky/ugc/`.
-- To post: write `appeeky/social/drafts/<date>-<slug>.yaml` (`accounts`, `text`, `when`, `media`, `why`) and run `social check`. To make a video: write `appeeky/ugc/briefs/<date>-<slug>.yaml` (`persona`, `script`, `scene`, `caption`, `durationSec`, `aspectRatio`, `why`) and run `ugc generate --dry-run` for its cost.
+- `social pull` writes the connected accounts, the posts made through Appeeky and in each platform's app, how each did, comments and followers to `appeeky/social/` (read `summary.md`). `ugc pull` writes the personas (`ready` when they can make clips) and their clips to `appeeky/ugc/`.
+- To post: write `appeeky/social/drafts/<date>-<slug>.yaml` (`accounts`, `text`, `when`, `media`, `tiktok`, `why`) and run `social check`. Name accounts by handle (`tiktok:@handle`) when a platform has more than one. To make a video: write `appeeky/ugc/briefs/<date>-<slug>.yaml` (`persona`, `script`, `scene`, `caption`, `durationSec`, `aspectRatio`, `why`) and run `ugc generate --dry-run` for its cost.
 - Open a pull request. `social push` and `ugc generate` run after the merge (the push workflow does it). Never run them, or `ugc generate --yes`, unless the user asked: posts are public and clips use media credits.
 - Give each post or video its own smart link (`experiment add --link <channel>`) so `experiment close` can say what it brought.
 

@@ -139,7 +139,7 @@ A field you leave out of a listing file is not managed by the spec: it is never 
 | `experiment add\|list\|close` | Track growth experiments outside the listing (screenshots, UGC, ads, pricing) with one metric and a check date. |
 | `screenshots pull\|check` | Download the live App Store screenshots into `appeeky/screenshots/` and check their sizes. |
 | `report` | Markdown for a pull request: listing changes, check results and coverage against `--base`. |
-| `social pull\|check\|push` | Organic social media through the accounts connected in Appeeky: `pull` writes the accounts, recent posts and how they did to `appeeky/social/`; `check` checks the drafts in `appeeky/social/drafts/`; `push` sends them. Needs `APPEEKY_API_KEY`. |
+| `social pull\|check\|push` | Organic social media through the accounts connected in Appeeky: `pull` writes the accounts, recent posts (made through Appeeky and in each platform's app), how they did, comments and followers to `appeeky/social/`; `check` checks the drafts in `appeeky/social/drafts/`; `push` sends them. Needs `APPEEKY_API_KEY`. |
 | `ugc pull\|generate` | UGC from your Appeeky creator personas: `pull` writes the personas and their clips to `appeeky/ugc/`; `generate` makes a clip from each brief in `appeeky/ugc/briefs/` (`--dry-run` shows the cost in media credits). Needs `APPEEKY_API_KEY`. |
 | `agents install` | Write the specialist subagents and the `/appeeky-cofounder` review into `.claude/` (`--for opencode` or `all` for `.opencode/`). Files you changed are kept unless `--force`. |
 
@@ -275,9 +275,12 @@ With the social accounts and creator personas you set up in Appeeky, posts and v
 
 ```
 appeeky/social/accounts.yaml        connected accounts (platform, name, id)
-appeeky/social/posts.jsonl          recent posts and each platform's result: views, likes, comments, shares
-appeeky/social/summary.md           the last 30 days per platform, and what did best
-appeeky/social/drafts/<name>.yaml   a post to send: accounts, text, when, media, why
+appeeky/social/posts.jsonl          posts made through Appeeky and each platform's result: views, likes, comments, shares
+appeeky/social/native-posts.jsonl   posts made in the platform's own app, with the same numbers
+appeeky/social/comments.jsonl       recent comments under the accounts' posts
+appeeky/social/insights.yaml        followers and growth per account
+appeeky/social/summary.md           the last 30 days per platform and account, and what did best across all posts
+appeeky/social/drafts/<name>.yaml   a post to send: accounts, text, when, media, tiktok, why
 appeeky/ugc/personas.yaml           creator personas, and whether each can make clips yet
 appeeky/ugc/clips.jsonl             the clips made with them
 appeeky/ugc/briefs/<name>.yaml      a video to make: persona, script, scene, caption, why
@@ -286,14 +289,41 @@ appeeky/ugc/personas/<name>.yaml    optional: a persona kept in the repo, with i
 
 ```yaml
 # appeeky/social/drafts/2026-11-10-fan-sounds.yaml
-accounts: [twitter, instagram]       # platforms from accounts.yaml, or account ids
+accounts: [twitter, tiktok:@sleepysounds]
 text: "Fan sounds are here. Pick a fan, set a timer, sleep."
 when: "2026-11-12T16:00:00Z"          # without it, the post goes out when it is sent
 media: ["https://…/fan.mp4"]          # Instagram, TikTok and Pinterest need one
+tiktok:
+  disclosure: own_brand               # it promotes your own app
+  inbox_draft: true                   # lands in the TikTok inbox; finish it in the app
 why: "Users asked for fan sounds in 9 reviews; it shipped in 3.2."
 ```
 
-`social check` flags drafts that would fail: a platform with no connected account, text over the platform's limit, a missing image, a time in the past. `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
+Each entry in `accounts` is one of:
+
+| Entry | Goes to |
+| --- | --- |
+| `twitter`, `x`, `instagram`, … | the one account connected on that platform; with several, `check` fails and lists their handles |
+| `tiktok:all` | every account connected on that platform |
+| `@sleepysounds`, `u/sleepdev` | the account with that handle (add the platform when two platforms share it) |
+| `tiktok:@sleepysounds` | that handle on that platform |
+| an `id` from accounts.yaml | that account |
+
+The `tiktok` block applies to the TikTok accounts the draft goes to. Every key is optional:
+
+| Key | Values | Default |
+| --- | --- | --- |
+| `privacy` | `public`, `friends`, `followers`, `only_me` | `public` |
+| `disclosure` | `none`, `own_brand` (promotes your own app or business), `paid_partnership` | `none` |
+| `inbox_draft` | `true` uploads it to the creator's TikTok inbox to finish and post in the app, for example to add TikTok's AI-generated label | `false` |
+| `comments` | `false` turns comments off | `true` |
+| `title` | photo posts: up to 90 characters; the text becomes the description | |
+| `auto_music` | photo posts: `true` lets TikTok add music | |
+| `cover_index` | photo posts: the cover image, from 0 | |
+| `cover_time_ms` | video posts: the frame used as the cover | |
+| `cover_image_url` | video posts: an https image used as the cover | |
+
+`social check` flags drafts that would fail: an account that is not connected, a platform name that matches several accounts, text over the platform's limit, a missing image, a time in the past, and TikTok's rules (a disclosed post can't be `only_me` unless it is an inbox draft, at most 35 images, images and a video can't mix, a title over 90 characters). `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
 
 ### Clips on your own fal key
 
