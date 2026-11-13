@@ -23,14 +23,14 @@ Run the review below, write the brief, and propose at most one listing change.
    - **Where we stand:** what is being measured and when it is checked
    - **What the specialists found:** a few lines each, with the numbers
    - **The change:** what, why, the metric and when it is checked; or why there is none this time
-   - **For a person:** review replies to send, ads changes, product requests, the next UGC experiment with its creator brief, and posts to publish. Spec does not do these.
+   - **For a person:** review replies to send, comment replies to approve (the social specialist's exact `social reply` commands, which the owner runs), ads changes, product requests, the next UGC experiment with its creator brief, and posts to publish. Spec does not do these.
    - **Not now:** good candidates you did not pick, and why
 
 6. **Turn what is for a person into drafts they approve by merging:**
-   - Each post the social specialist proposed for a connected account: `appeeky/social/drafts/<YYYY-MM-DD>-<slug>.yaml` with `accounts` (each as `<platform>:@handle` from `appeeky/social/accounts.yaml`; a bare platform only when one account is connected on it), `text`, `when` (ISO, at least a day ahead), `media` (public URLs, when the platform needs one), `tiktok` for TikTok posts (`disclosure: own_brand` when it promotes the app, `inbox_draft: true` when the media is AI-generated) and `why`. Run `social check` and fix every problem, or leave the post out.
+   - Each post the social specialist proposed for a connected account: `appeeky/social/drafts/<YYYY-MM-DD>-<slug>.yaml` with `accounts` (each as `<platform>:@handle` from `appeeky/social/accounts.yaml`; a bare platform only when one account is connected on it), `text`, `when` (ISO, at least a day ahead), `media` (public URLs, when the platform needs one), `tiktok` for TikTok posts (`disclosure: own_brand` when it promotes the app, `inbox_draft: true` when the media is AI-generated), `youtube` for YouTube posts (`title`, `visibility`, `synthetic_media: true` when the video is AI-generated) and `why`. Run `social check` and fix every problem, or leave the post out.
    - The video the UGC specialist proposed, if a persona is ready: `appeeky/ugc/briefs/<YYYY-MM-DD>-<slug>.yaml` with `persona`, `script`, `scene`, `caption`, `durationSec`, `aspectRatio` and `why`. Run `ugc generate --dry-run` to show its cost in credits.
    - After the merge, `social push` sends the posts and `ugc generate` makes the clips. Never run those yourself.
 
 7. **Write `.appeeky/proposal.md`:** the first line is a short pull request title. Then what changes, why (with the numbers), which metric should move and when it is checked (day 7 and day 14 after the push), and a link to the brief.
 
-Do not run `push`, `reviews push`, `social push`, `ugc generate` (without `--dry-run`), `revert` or `pull`. A person reviews the pull request; the push runs when it is merged.
+Do not run `push`, `reviews push`, `social push`, `social reply`, `social hide`, `social like`, `social delete-comment`, `ugc generate` (without `--dry-run`), `revert` or `pull`. A person reviews the pull request; the push runs when it is merged.

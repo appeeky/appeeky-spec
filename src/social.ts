@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -66,6 +67,9 @@ export interface SocialComment {
   own?: boolean;
   reply?: boolean;
   at?: string;
+  /** When the account replied to it, through Appeeky. */
+  repliedAt?: string;
+  hidden?: boolean;
 }
 
 export interface AccountInsights {
@@ -155,6 +159,13 @@ interface CommentRow {
   isReply?: boolean | null;
   parentCommentId?: string | null;
   commentedAt?: string | null;
+  repliedAt?: string | null;
+  replyText?: string | null;
+  hidden?: boolean | null;
+  canReply?: boolean;
+  canHide?: boolean;
+  canLike?: boolean;
+  canDelete?: boolean;
 }
 
 interface InsightsRow {
@@ -232,6 +243,8 @@ export function toComment(r: CommentRow, accounts: SocialAccount[]): SocialComme
     own: r.isOwnAccount ? true : undefined,
     reply: r.isReply ? true : undefined,
     at: r.commentedAt ?? undefined,
+    repliedAt: r.repliedAt ?? undefined,
+    hidden: r.hidden ? true : undefined,
   });
 }
 
@@ -452,6 +465,24 @@ const tiktokSchema = z
 
 export type TikTokOptions = z.infer<typeof tiktokSchema>;
 
+export const YOUTUBE_TITLE_LIMIT = 100;
+export const YOUTUBE_VISIBILITY = ["public", "unlisted", "private"] as const;
+
+const youtubeSchema = z
+  .object({
+    /** The video title; without it, the first line of the text. */
+    title: z.string().min(1).optional(),
+    /** Who can watch it: public (default), unlisted or private. */
+    visibility: z.enum(YOUTUBE_VISIBILITY).optional(),
+    /** Made for kids (default false). */
+    made_for_kids: z.boolean().optional(),
+    /** The video is AI-generated or altered to look real (default false). */
+    synthetic_media: z.boolean().optional(),
+  })
+  .strict();
+
+export type YouTubeOptions = z.infer<typeof youtubeSchema>;
+
 export const draftSchema = z
   .object({
     /**
@@ -463,10 +494,12 @@ export const draftSchema = z
     text: z.string().min(1),
     /** ISO time to schedule it; without it, the post goes out when it is sent. */
     when: z.string().optional(),
-    /** Public image or video URLs. Instagram, TikTok and Pinterest need one. */
+    /** Public image or video URLs. Instagram, TikTok and Pinterest need one; YouTube needs exactly one video. */
     media: z.array(z.string().url()).optional(),
     /** TikTok's options for the TikTok accounts it goes to. */
     tiktok: tiktokSchema.optional(),
+    /** YouTube's options for the YouTube accounts it goes to. */
+    youtube: youtubeSchema.optional(),
     /** Why this post, for whoever reviews the pull request. */
     why: z.string().optional(),
     status: z.enum(["draft", "sent"]).default("draft"),
@@ -478,8 +511,19 @@ export const draftSchema = z
 export type Draft = z.infer<typeof draftSchema>;
 
 /** Character limits per platform, for `check`-style warnings before sending. */
-export const TEXT_LIMIT: Record<string, number> = { twitter: 280, x: 280, threads: 500, bluesky: 300, linkedin: 3000, instagram: 2200, tiktok: 2200, facebook: 63206, pinterest: 500, reddit: 40000 };
-const NEEDS_MEDIA = new Set(["instagram", "tiktok", "pinterest"]);
+export const TEXT_LIMIT: Record<string, number> = { twitter: 280, x: 280, threads: 500, bluesky: 300, linkedin: 3000, instagram: 2200, tiktok: 2200, facebook: 63206, pinterest: 500, reddit: 40000, youtube: 5000 };
+const NEEDS_MEDIA = new Set(["instagram", "tiktok", "pinterest", "youtube"]);
+
+/** Images and videos a post can carry, per platform. TikTok has its own check below. */
+export const MEDIA_LIMIT: Record<string, { images: number; videos: number; mix: boolean }> = {
+  youtube: { images: 0, videos: 1, mix: false },
+  bluesky: { images: 4, videos: 1, mix: false },
+  facebook: { images: 10, videos: 1, mix: false },
+  threads: { images: 20, videos: 10, mix: true },
+};
+
+/** Text length the way the platforms count it: characters, not UTF-16 units. */
+export const textLength = (text: string) => [...text].length;
 
 export async function readDrafts(root: string): Promise<Array<Draft & { file: string }>> {
   const dir = draftsDir(root);
@@ -550,6 +594,35 @@ export function resolveAccounts(draft: Pick<Draft, "accounts">, accounts: Social
 const VIDEO = /\.(mp4|mov|m4v|webm)(\?|#|$)/i;
 const IMAGE = /\.(jpe?g|png|webp|gif|heic)(\?|#|$)/i;
 
+/** Images and videos in `media:`, by file extension. URLs without one are counted as neither. */
+function mediaCounts(media: string[] = []) {
+  return { images: media.filter((m) => IMAGE.test(m)).length, videos: media.filter((m) => VIDEO.test(m)).length, total: media.length };
+}
+
+function mediaIssues(platform: string, media: string[] | undefined): string[] {
+  const limit = MEDIA_LIMIT[platform];
+  if (!limit) return [];
+  const { images, videos, total } = mediaCounts(media);
+  if (platform === "youtube") {
+    if (images || total !== 1) return [`youtube: needs exactly one video (media:), and no images`];
+    return [];
+  }
+  const issues: string[] = [];
+  if (!limit.mix && images && videos) issues.push(`${platform}: a post is either images or one video, not both (media:)`);
+  if (images > limit.images) issues.push(`${platform}: ${images} images, at most ${limit.images}`);
+  if (videos > limit.videos) issues.push(`${platform}: ${videos} videos, at most ${limit.videos}`);
+  return issues;
+}
+
+function youtubeIssues(draft: Draft, toYouTube: boolean): string[] {
+  const y = draft.youtube;
+  if (!y) return [];
+  if (!toYouTube) return ["youtube: options set, but the draft goes to no YouTube account"];
+  if (y.title && textLength(y.title) > YOUTUBE_TITLE_LIMIT) return [`youtube: title ${textLength(y.title)}/${YOUTUBE_TITLE_LIMIT} characters`];
+  if (!y.title && textLength(draft.text.split("\n")[0]!.trim()) > YOUTUBE_TITLE_LIMIT) return [`youtube: no title, and the first line of the text is over ${YOUTUBE_TITLE_LIMIT} characters; set youtube.title`];
+  return [];
+}
+
 function tiktokIssues(draft: Draft, toTikTok: boolean): string[] {
   const t = draft.tiktok;
   const media = draft.media ?? [];
@@ -587,10 +660,12 @@ export function draftIssues(draft: Draft, accounts: SocialAccount[], now = new D
   const platforms = [...new Set(to.map((a) => a.platform.toLowerCase()))];
   for (const p of platforms) {
     const limit = TEXT_LIMIT[p];
-    if (limit && draft.text.length > limit) issues.push(`${p}: ${draft.text.length}/${limit} characters`);
-    if (NEEDS_MEDIA.has(p) && !draft.media?.length) issues.push(`${p} needs an image or video (media:)`);
+    if (limit && textLength(draft.text) > limit) issues.push(`${p}: ${textLength(draft.text)}/${limit} characters`);
+    if (NEEDS_MEDIA.has(p) && !draft.media?.length) issues.push(p === "youtube" ? "youtube needs a video (media:)" : `${p} needs an image or video (media:)`);
+    else if (draft.media?.length) issues.push(...mediaIssues(p, draft.media));
   }
   issues.push(...tiktokIssues(draft, platforms.includes("tiktok")));
+  issues.push(...youtubeIssues(draft, platforms.includes("youtube")));
   if (draft.when && !(new Date(draft.when) > now)) issues.push(`when ${draft.when} is not in the future`);
   return issues;
 }
@@ -610,19 +685,155 @@ export function tiktokExtra(t: TikTokOptions): Record<string, unknown> {
   });
 }
 
+/** A draft's `youtube:` block as the API's `extra.youtube`. */
+export function youtubeExtra(y: YouTubeOptions): Record<string, unknown> {
+  return compact({ title: y.title, visibility: y.visibility, madeForKids: y.made_for_kids, containsSyntheticMedia: y.synthetic_media });
+}
+
 /** Create the post in Appeeky (it publishes now, or at `when`) and mark the draft sent. */
 export async function sendDraft(api: AppeekyApi, draft: Draft & { file: string }, accounts: SocialAccount[], now = new Date()): Promise<string> {
   const { accounts: to, missing, ambiguous } = resolveAccounts(draft, accounts);
   if (missing.length || ambiguous.length || !to.length) throw new Error(draftIssues(draft, accounts, now).join("; ") || "no connected account to send to");
-  const tiktok = draft.tiktok && to.some((a) => a.platform.toLowerCase() === "tiktok") ? tiktokExtra(draft.tiktok) : {};
+  const on = (platform: string) => to.some((a) => a.platform.toLowerCase() === platform);
+  const tiktok = draft.tiktok && on("tiktok") ? tiktokExtra(draft.tiktok) : {};
+  const youtube = draft.youtube && on("youtube") ? youtubeExtra(draft.youtube) : {};
+  const extra = compact({ tiktok: Object.keys(tiktok).length ? tiktok : undefined, youtube: Object.keys(youtube).length ? youtube : undefined });
   const created = await api.post<{ id: string; status: string }>("/social/posts", {
     content: draft.text,
     account_ids: to.map((a) => a.id),
     ...(draft.when ? { scheduled_for: new Date(draft.when).toISOString() } : {}),
     ...(draft.media?.length ? { media_urls: draft.media } : {}),
-    ...(Object.keys(tiktok).length ? { extra: { tiktok } } : {}),
+    ...(Object.keys(extra).length ? { extra } : {}),
   });
   const { file, ...rest } = draft;
   await writeFile(file, YAML.stringify({ ...rest, status: "sent", postId: created.id, sentAt: now.toISOString() }, { lineWidth: 0 }));
   return created.id;
 }
+
+// ── Comments ────────────────────────────────────────────────────────────────
+
+/** Reply length per platform, as the Appeeky API checks it; other platforms take long replies. */
+export const COMMENT_REPLY_MAX: Record<string, number> = {
+  bluesky: 300,
+  threads: 500,
+  twitter: 280,
+  instagram: 2200,
+  tiktok: 150,
+  youtube: 10000,
+  reddit: 10000,
+  facebook: 8000,
+  linkedin: 1250,
+};
+
+/** A comment as `social comments` shows it, with what can be done to it. */
+export interface CommentItem {
+  id: string;
+  account: string;
+  accountId: string;
+  platform: string;
+  text: string;
+  author?: string;
+  postUrl?: string;
+  postId?: string;
+  at?: string;
+  own?: boolean;
+  reply?: boolean;
+  repliedAt?: string;
+  replyText?: string;
+  hidden?: boolean;
+  canReply: boolean;
+  canHide: boolean;
+  canLike: boolean;
+  canDelete: boolean;
+}
+
+export function toCommentItem(r: CommentRow, accounts: SocialAccount[] = []): CommentItem {
+  return {
+    ...compact({
+      id: r.id,
+      account: accounts.find((a) => a.id === r.accountId)?.name ?? r.accountId,
+      accountId: r.accountId,
+      platform: r.platform,
+      text: r.text ?? "",
+      author: r.author?.username ?? r.author?.name ?? undefined,
+      postUrl: r.postPermalink ?? undefined,
+      postId: r.postId ?? undefined,
+      at: r.commentedAt ?? undefined,
+      own: r.isOwnAccount ? true : undefined,
+      reply: r.isReply ? true : undefined,
+      repliedAt: r.repliedAt ?? undefined,
+      replyText: r.replyText ?? undefined,
+      hidden: r.hidden ? true : undefined,
+    }),
+    canReply: r.canReply !== false,
+    canHide: r.canHide === true,
+    canLike: r.canLike === true,
+    canDelete: r.canDelete === true,
+  };
+}
+
+/** Comments on the connected accounts' posts, newest first. `unanswered`: other people's, not replied to yet. */
+export async function listComments(
+  api: AppeekyApi,
+  options: { unanswered?: boolean; accountId?: string; postId?: string; limit?: number } = {},
+  accounts: SocialAccount[] = [],
+): Promise<CommentItem[]> {
+  const query: Record<string, string> = { status: options.unanswered ? "unanswered" : "all", limit: String(options.limit ?? 50) };
+  if (options.accountId) query.account_id = options.accountId;
+  if (options.postId) query.post_id = options.postId;
+  const rows = (await api.get<CommentRow[]>("/social/comments", query)) ?? [];
+  return rows.map((r) => toCommentItem(r, accounts));
+}
+
+/** What is wrong with a reply before it is sent, or null. */
+export function commentReplyIssue(platform: string | undefined, message: string): string | null {
+  if (!message.trim()) return "write a reply first";
+  const max = platform ? COMMENT_REPLY_MAX[platformKey(platform)] : undefined;
+  const length = textLength(message.trim());
+  if (max && length > max) return `${platformKey(platform!)} replies take up to ${max} characters; this one has ${length}`;
+  return null;
+}
+
+/**
+ * The platform a comment is on: from `appeeky/social/comments.jsonl` when the last pull has it,
+ * else from the latest comments in Appeeky. Undefined when neither has it (the API still checks).
+ */
+export async function commentPlatform(api: AppeekyApi, root: string, commentId: string): Promise<string | undefined> {
+  const file = join(socialDir(root), "comments.jsonl");
+  if (existsSync(file)) {
+    for (const line of (await readFile(file, "utf8")).split("\n")) {
+      if (!line.trim()) continue;
+      const row = JSON.parse(line) as SocialComment;
+      if (row.id === commentId) return row.platform;
+    }
+  }
+  const rows = (await api.get<CommentRow[]>("/social/comments", { status: "all", limit: "200" }).catch(() => null)) ?? [];
+  return rows.find((r) => r.id === commentId)?.platform;
+}
+
+/**
+ * The same reply to the same comment gets the same key, so running the command twice (or a retry
+ * after a timeout) posts it once.
+ */
+export const replyIdempotencyKey = (commentId: string, message: string) =>
+  `spec-reply:${commentId}:${createHash("sha256").update(message.trim()).digest("hex").slice(0, 32)}`;
+
+export interface ReplyResult {
+  commentId: string;
+  replyCommentId: string | null;
+  repliedAt: string;
+}
+
+/** Reply to a comment from the account it is on. Checks the platform's length first. */
+export async function replyToComment(api: AppeekyApi, commentId: string, message: string, platform?: string): Promise<ReplyResult> {
+  const issue = commentReplyIssue(platform, message);
+  if (issue) throw new Error(`Not sent: ${issue}.`);
+  return api.post<ReplyResult>(`/social/comments/${encodeURIComponent(commentId)}/reply`, { message: message.trim() }, { headers: { "Idempotency-Key": replyIdempotencyKey(commentId, message) } });
+}
+
+export const hideComment = (api: AppeekyApi, commentId: string, hidden: boolean) =>
+  api.post<{ hidden: boolean }>(`/social/comments/${encodeURIComponent(commentId)}/hide`, { hidden });
+
+export const likeComment = (api: AppeekyApi, commentId: string) => api.post<{ liked: true }>(`/social/comments/${encodeURIComponent(commentId)}/like`, {});
+
+export const deleteComment = (api: AppeekyApi, commentId: string) => api.request<{ deleted: true }>("DELETE", `/social/comments/${encodeURIComponent(commentId)}`);

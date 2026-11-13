@@ -139,7 +139,8 @@ A field you leave out of a listing file is not managed by the spec: it is never 
 | `experiment add\|list\|close` | Track growth experiments outside the listing (screenshots, UGC, ads, pricing) with one metric and a check date. |
 | `screenshots pull\|check` | Download the live App Store screenshots into `appeeky/screenshots/` and check their sizes. |
 | `report` | Markdown for a pull request: listing changes, check results and coverage against `--base`. |
-| `social pull\|check\|push` | Organic social media through the accounts connected in Appeeky: `pull` writes the accounts, recent posts (made through Appeeky and in each platform's app), how they did, comments and followers to `appeeky/social/`; `check` checks the drafts in `appeeky/social/drafts/`; `push` sends them. Needs `APPEEKY_API_KEY`. |
+| `social pull\|check\|push` | Organic social media through the accounts connected in Appeeky (X, Instagram, TikTok, LinkedIn, Pinterest, Reddit, YouTube, Threads, Facebook, Bluesky): `pull` writes the accounts, recent posts (made through Appeeky and in each platform's app), how they did, comments and followers to `appeeky/social/`; `check` checks the drafts in `appeeky/social/drafts/`; `push` sends them. Needs `APPEEKY_API_KEY`. |
+| `social comments\|reply\|hide\|like\|delete-comment` | Comments on your posts: `comments` lists them (`--unanswered`, `--account`, `--post`, `--limit`); `reply <id> "<message>"` answers from the account it is on, after checking the platform's reply limit; `hide <id>` (`--unhide`), `like <id>`; `delete-comment <id>` asks first, or needs `--yes` outside a terminal. Needs `APPEEKY_API_KEY`. |
 | `ugc pull\|generate` | UGC from your Appeeky creator personas: `pull` writes the personas and their clips to `appeeky/ugc/`; `generate` makes a clip from each brief in `appeeky/ugc/briefs/` (`--dry-run` shows the cost in media credits). Needs `APPEEKY_API_KEY`. |
 | `agents install` | Write the specialist subagents and the `/appeeky-cofounder` review into `.claude/` (`--for opencode` or `all` for `.opencode/`). Files you changed are kept unless `--force`. |
 
@@ -292,7 +293,7 @@ appeeky/ugc/personas/<name>.yaml    optional: a persona kept in the repo, with i
 accounts: [twitter, tiktok:@sleepysounds]
 text: "Fan sounds are here. Pick a fan, set a timer, sleep."
 when: "2026-11-12T16:00:00Z"          # without it, the post goes out when it is sent
-media: ["https://…/fan.mp4"]          # Instagram, TikTok and Pinterest need one
+media: ["https://…/fan.mp4"]          # Instagram, TikTok and Pinterest need one; YouTube needs one video
 tiktok:
   disclosure: own_brand               # it promotes your own app
   inbox_draft: true                   # lands in the TikTok inbox; finish it in the app
@@ -323,7 +324,41 @@ The `tiktok` block applies to the TikTok accounts the draft goes to. Every key i
 | `cover_time_ms` | video posts: the frame used as the cover | |
 | `cover_image_url` | video posts: an https image used as the cover | |
 
-`social check` flags drafts that would fail: an account that is not connected, a platform name that matches several accounts, text over the platform's limit, a missing image, a time in the past, and TikTok's rules (a disclosed post can't be `only_me` unless it is an inbox draft, at most 35 images, images and a video can't mix, a title over 90 characters). `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
+The `youtube` block applies to the YouTube accounts the draft goes to. Every key is optional:
+
+| Key | Values | Default |
+| --- | --- | --- |
+| `title` | up to 100 characters | the first line of the text |
+| `visibility` | `public`, `unlisted`, `private` | `public` |
+| `made_for_kids` | `true` when the video is made for children | `false` |
+| `synthetic_media` | `true` when the video is AI-generated or altered to look real | `false` |
+
+What each platform takes:
+
+| Platform | Text | Media |
+| --- | --- | --- |
+| YouTube | up to 5,000 characters (the description) | exactly one video |
+| Threads | up to 500 characters | optional: up to 20 images and 10 videos |
+| Bluesky | up to 300 characters | optional: up to 4 images or one video, not both |
+| Facebook | up to 63,206 characters | optional: up to 10 images or one video, not both |
+| X | up to 280 characters | optional |
+| Instagram, TikTok, Pinterest | 2,200, 2,200, 500 characters | at least one image or video |
+
+`social check` flags drafts that would fail: an account that is not connected, a platform name that matches several accounts, text over the platform's limit, a missing image or video, too many images or videos for the platform, images and a video mixed where the platform does not allow it, a time in the past, TikTok's rules (a disclosed post can't be `only_me` unless it is an inbox draft, at most 35 images, images and a video can't mix, a title over 90 characters) and YouTube's (exactly one video, a title over 100 characters). Media types are read from the URL's file extension. `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
+
+### Comments
+
+`social comments --unanswered` lists the comments you have not answered yet, newest first, with the id to act on:
+
+```bash
+appeeky-spec social comments --unanswered --account tiktok:@sleepysounds
+appeeky-spec social reply 6f1c… "Yes, every sound works offline."
+appeeky-spec social hide 6f1c…            # --unhide shows it again
+appeeky-spec social like 6f1c…
+appeeky-spec social delete-comment 6f1c…  # asks first; --yes outside a terminal
+```
+
+`reply` checks the platform's reply limit before sending (X 280, Bluesky 300, TikTok 150, Threads 500, LinkedIn 1,250, Instagram 2,200 characters) and sends an idempotency key made from the comment and the text, so running the same reply twice posts it once. Hiding works on Facebook, Instagram, Threads, X and TikTok; liking on Facebook, X, Bluesky, Reddit, LinkedIn and TikTok; Threads, TikTok, Bluesky, Reddit and X only let you delete your own comments. `--json` on `comments` shows `canReply`, `canHide`, `canLike` and `canDelete` for each. The social specialist drafts replies to unanswered comments as `social reply` commands for you to run; it never sends them, and the weekly routines deny these commands to the agent.
 
 ### Clips on your own fal key
 
@@ -601,7 +636,7 @@ Appeeky Spec ships six specialist subagents and a review that runs them, so your
 | `appeeky-ads` | Apple Search Ads, Meta, TikTok and attribution data | paid searches worth targeting, and spend findings for a person |
 | `appeeky-releases` | releases and their day-7 and day-14 checks, `loops.md`, the app's git history | what won and lost, what waits for a new version, What's New text |
 | `appeeky-ugc` | UGC experiments, smart link and attribution results, personas, review words | which creators and hooks worked, the next UGC experiment with a brief for the creator |
-| `appeeky-social` | what shipped and won, What's New, review words, the channels that bring installs | posts to publish, drafted per channel, with the link to use |
+| `appeeky-social` | what shipped and won, What's New, review words, the channels that bring installs, unanswered comments | posts to publish, drafted per channel, with the link to use, and replies to comments as commands for the owner to run |
 
 The specialists only read. The **co-founder review** (`/appeeky-cofounder`) is the one that acts: it checks which stores are free, starts the six specialists in parallel, picks the single change with the strongest evidence, edits and checks it, and writes a brief to `appeeky/briefs/<date>.md` with what each specialist found, the change, what is for a person (review replies, ads, product requests, the next UGC experiment, posts to publish) and what it did not pick. It turns the social specialist's posts into drafts in `appeeky/social/drafts/` and the UGC specialist's next video into a brief in `appeeky/ugc/briefs/`, so they go out after the same merge. Then it writes the pull request. It never pushes, posts or spends credits itself: the weekly routines deny those commands to the agent.
 
