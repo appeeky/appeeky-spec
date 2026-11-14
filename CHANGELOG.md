@@ -4,6 +4,7 @@
 
 ### Features
 
+- Reddit drafts: a `reddit:` block with the subreddit (required), title, link and flair. Without it, Reddit posts had no subreddit and the API refused them.
 - **social:** YouTube, Threads, Facebook and Bluesky. `social check` checks each platform's rules before the API does: YouTube needs exactly one video, Threads takes up to 500 characters, Bluesky up to 300 characters and 4 images or one video, Facebook up to 10 images or one video; Threads, Bluesky and Facebook take text alone. A draft's `youtube:` block sets `title` (up to 100 characters), `visibility`, `made_for_kids` and `synthetic_media`.
 - **social:** comments. `social comments` lists them (`--unanswered`, `--account`, `--post`, `--limit`); `social reply <id> "<message>"` answers from the account it is on, after checking the platform's reply limit, with an idempotency key so the same reply posts once; `social hide` (`--unhide`), `social like` and `social delete-comment` (asks first, or `--yes` outside a terminal). `social pull` keeps whether each comment was answered or hidden.
 - **agents:** the social specialist reads unanswered comments and drafts replies as `social reply` commands for the owner to run; it never sends them. The co-founder review puts them in the brief, and the weekly routines deny the comment commands to the agent.

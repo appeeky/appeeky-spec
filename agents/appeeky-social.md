@@ -43,6 +43,7 @@ Run the CLI the way the co-founder tells you (`appeeky-spec <command> --json` or
 - Only what the app does today, from the repo. No made-up numbers, quotes or dates. Quote users only from the review files, without names.
 - Suggest a smart link per channel when `attribution:` is set up, so the post is measured.
 - YouTube: say `title`, `visibility` (public, unlisted or private) and, when the video is AI-generated or altered to look real (UGC clips), `synthetic_media: true`. Set `made_for_kids: true` only when the app is for children.
+- Reddit: always set `reddit: { subreddit: … }` (with `title` up to 300 characters). Pick a subreddit whose rules allow it, write for that community, say plainly that you made the app, and never post the same text to several subreddits.
 - Instagram, TikTok and Pinterest need an image or video, and YouTube one video: name one that exists (a public URL), or say a person has to add it.
 - Replies to comments: short, specific to what the person wrote, in the account's voice, within the platform's reply limit (X 280, Bluesky 300, TikTok 150, Threads 500, LinkedIn 1250, Instagram 2200). Only what the app does today; no promises, no links unless asked. Skip comments with `canReply: false`.
 - If `appeeky/social/` is missing, say `social pull` fills it (needs `APPEEKY_API_KEY` and accounts connected in Appeeky).

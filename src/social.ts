@@ -483,6 +483,23 @@ const youtubeSchema = z
 
 export type YouTubeOptions = z.infer<typeof youtubeSchema>;
 
+export const REDDIT_TITLE_LIMIT = 300;
+
+const redditSchema = z
+  .object({
+    /** The subreddit to post in, with or without r/. Required for Reddit. */
+    subreddit: z.string().min(1),
+    /** The post title; without it, the first line of the text. */
+    title: z.string().min(1).optional(),
+    /** Makes it a link post to this URL, with the text as the body. */
+    link: z.string().url().optional(),
+    /** The subreddit's flair id, when it requires one. */
+    flair_id: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type RedditOptions = z.infer<typeof redditSchema>;
+
 export const draftSchema = z
   .object({
     /**
@@ -500,6 +517,8 @@ export const draftSchema = z
     tiktok: tiktokSchema.optional(),
     /** YouTube's options for the YouTube accounts it goes to. */
     youtube: youtubeSchema.optional(),
+    /** Reddit's options for the Reddit accounts it goes to: the subreddit is required. */
+    reddit: redditSchema.optional(),
     /** Why this post, for whoever reviews the pull request. */
     why: z.string().optional(),
     status: z.enum(["draft", "sent"]).default("draft"),
@@ -623,6 +642,17 @@ function youtubeIssues(draft: Draft, toYouTube: boolean): string[] {
   return [];
 }
 
+function redditIssues(draft: Draft, toReddit: boolean): string[] {
+  const r = draft.reddit;
+  if (!toReddit) return r ? ["reddit: options set, but the draft goes to no Reddit account"] : [];
+  if (!r) return ["reddit needs a subreddit: add reddit: { subreddit: … }"];
+  const title = r.title ?? draft.text.split("\n")[0]!.trim();
+  if (textLength(title) > REDDIT_TITLE_LIMIT) {
+    return [r.title ? `reddit: title ${textLength(title)}/${REDDIT_TITLE_LIMIT} characters` : `reddit: no title, and the first line of the text is over ${REDDIT_TITLE_LIMIT} characters; set reddit.title`];
+  }
+  return [];
+}
+
 function tiktokIssues(draft: Draft, toTikTok: boolean): string[] {
   const t = draft.tiktok;
   const media = draft.media ?? [];
@@ -666,6 +696,7 @@ export function draftIssues(draft: Draft, accounts: SocialAccount[], now = new D
   }
   issues.push(...tiktokIssues(draft, platforms.includes("tiktok")));
   issues.push(...youtubeIssues(draft, platforms.includes("youtube")));
+  issues.push(...redditIssues(draft, platforms.includes("reddit")));
   if (draft.when && !(new Date(draft.when) > now)) issues.push(`when ${draft.when} is not in the future`);
   return issues;
 }
@@ -690,6 +721,11 @@ export function youtubeExtra(y: YouTubeOptions): Record<string, unknown> {
   return compact({ title: y.title, visibility: y.visibility, madeForKids: y.made_for_kids, containsSyntheticMedia: y.synthetic_media });
 }
 
+/** A draft's `reddit:` block as the API's flat `extra` keys (subreddit, title, url, flairId). */
+export function redditExtra(r: RedditOptions): Record<string, unknown> {
+  return compact({ subreddit: r.subreddit.replace(/^\/?r\//i, ""), title: r.title, url: r.link, flairId: r.flair_id });
+}
+
 /** Create the post in Appeeky (it publishes now, or at `when`) and mark the draft sent. */
 export async function sendDraft(api: AppeekyApi, draft: Draft & { file: string }, accounts: SocialAccount[], now = new Date()): Promise<string> {
   const { accounts: to, missing, ambiguous } = resolveAccounts(draft, accounts);
@@ -697,7 +733,8 @@ export async function sendDraft(api: AppeekyApi, draft: Draft & { file: string }
   const on = (platform: string) => to.some((a) => a.platform.toLowerCase() === platform);
   const tiktok = draft.tiktok && on("tiktok") ? tiktokExtra(draft.tiktok) : {};
   const youtube = draft.youtube && on("youtube") ? youtubeExtra(draft.youtube) : {};
-  const extra = compact({ tiktok: Object.keys(tiktok).length ? tiktok : undefined, youtube: Object.keys(youtube).length ? youtube : undefined });
+  const reddit = draft.reddit && on("reddit") ? redditExtra(draft.reddit) : {};
+  const extra = compact({ tiktok: Object.keys(tiktok).length ? tiktok : undefined, youtube: Object.keys(youtube).length ? youtube : undefined, ...reddit });
   const created = await api.post<{ id: string; status: string }>("/social/posts", {
     content: draft.text,
     account_ids: to.map((a) => a.id),

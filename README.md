@@ -333,6 +333,15 @@ The `youtube` block applies to the YouTube accounts the draft goes to. Every key
 | `made_for_kids` | `true` when the video is made for children | `false` |
 | `synthetic_media` | `true` when the video is AI-generated or altered to look real | `false` |
 
+The `reddit` block is required for Reddit accounts:
+
+| Key | Values | Default |
+| --- | --- | --- |
+| `subreddit` | the subreddit to post in, with or without `r/` | required |
+| `title` | up to 300 characters | the first line of the text |
+| `link` | a URL; makes it a link post, with the text as the body | |
+| `flair_id` | the subreddit's flair id, when it requires one | |
+
 What each platform takes:
 
 | Platform | Text | Media |
@@ -342,9 +351,10 @@ What each platform takes:
 | Bluesky | up to 300 characters | optional: up to 4 images or one video, not both |
 | Facebook | up to 63,206 characters | optional: up to 10 images or one video, not both |
 | X | up to 280 characters | optional |
+| Reddit | up to 40,000 characters (the body); a subreddit in `reddit:` | optional |
 | Instagram, TikTok, Pinterest | 2,200, 2,200, 500 characters | at least one image or video |
 
-`social check` flags drafts that would fail: an account that is not connected, a platform name that matches several accounts, text over the platform's limit, a missing image or video, too many images or videos for the platform, images and a video mixed where the platform does not allow it, a time in the past, TikTok's rules (a disclosed post can't be `only_me` unless it is an inbox draft, at most 35 images, images and a video can't mix, a title over 90 characters) and YouTube's (exactly one video, a title over 100 characters). Media types are read from the URL's file extension. `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
+`social check` flags drafts that would fail: an account that is not connected, a platform name that matches several accounts, text over the platform's limit, a missing image or video, too many images or videos for the platform, images and a video mixed where the platform does not allow it, a time in the past, TikTok's rules (a disclosed post can't be `only_me` unless it is an inbox draft, at most 35 images, images and a video can't mix, a title over 90 characters) YouTube's (exactly one video, a title over 100 characters) and Reddit's (a subreddit, a title over 300 characters). Media types are read from the URL's file extension. `ugc generate --dry-run` shows what each brief costs in media credits without making anything. The push workflow written by `init --ci` (and the docker `push` routine) runs `social push --yes` and `ugc generate --yes` when a merged pull request adds drafts or briefs; each is marked `sent` or `generating` and committed, so it never goes out twice. Social media needs the Startup plan or above in Appeeky; a persona needs a look (reference images) before it can make clips.
 
 ### Comments
 
