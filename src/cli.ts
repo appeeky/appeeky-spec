@@ -9,7 +9,7 @@ import { adsSnapshot, CHANNEL_LABELS, saveAdsSnapshot } from "./ads.js";
 import { COFOUNDER_COMMAND, installAgents, parseTargets, TARGET_DIRS, type InstalledFile } from "./agents.js";
 import { attributionClient, attributionClients, attributionMetricSource, createExperimentLink, hasClients, IOS_LINK_NOTE, iosOnlyLink, isClient, linkStore, linkValueReader } from "./attribution.js";
 import { pullCompetitors, similarApps } from "./competitors.js";
-import { draftIssues, fetchSocial, readAccounts, readDrafts, resolveAccounts, saveSocial, sendDraft } from "./social.js";
+import { commentPlatform, deleteComment, draftIssues, fetchSocial, hideComment, likeComment, listComments, readAccounts, readDrafts, replyToComment, resolveAccounts, saveSocial, sendDraft } from "./social.js";
 import { fetchUgc, findPersona, generateBrief, quoteBrief, readBriefs, readPersonas, saveUgc } from "./ugc.js";
 import { generateLocal, loadCore, planLocalClip, readAppeekyPersona, readLocalPersona, type LocalPersona } from "./ugc-local.js";
 import { categoryFile, categoryMetricSource, categoryPlans, chartSources, previousRank, readCategoryHistory, readCategoryRanks, saveCategoryRanks } from "./category.js";
@@ -859,7 +859,7 @@ export function buildProgram(): Command {
       for (const f of failed) console.log(`${c.red(f.id)} ${c.dim(f.message)}`);
     });
 
-  const social = program.command("social").description("Organic social media in the repo: accounts, posts and their results, and posts sent through a pull request (needs APPEEKY_API_KEY)");
+  const social = program.command("social").description("Organic social media in the repo: accounts, posts and their results, posts sent through a pull request, and comments to answer (needs APPEEKY_API_KEY)");
   social
     .command("pull")
     .description("Write the connected accounts, recent posts and their analytics, posts made in the platform apps, comments and followers to appeeky/social/, and summary.md")
@@ -884,7 +884,7 @@ export function buildProgram(): Command {
 
   social
     .command("check")
-    .description("Check the drafts in appeeky/social/drafts/: which account each goes to, length, media, TikTok options, time")
+    .description("Check the drafts in appeeky/social/drafts/: which account each goes to, length, media, TikTok and YouTube options, time")
     .action(async () => {
       const project = await load();
       const accounts = await readAccounts(project.root);
@@ -935,6 +935,101 @@ export function buildProgram(): Command {
         for (const f of failed) console.log(`${c.red(f.file)} ${c.dim(f.message)}`);
       }
       if (failed.length) process.exitCode = 1;
+    });
+
+  const socialApi = () => {
+    const a = api();
+    if (!a) throw new Error("Set APPEEKY_API_KEY: comments come from the social accounts connected in Appeeky.");
+    return a;
+  };
+
+  social
+    .command("comments")
+    .description("Comments on your posts, newest first, with what you can do to each (reply, hide, like, delete)")
+    .option("--unanswered", "Only other people's comments you have not replied to", false)
+    .option("--account <account>", "Only this account: its id, or a handle from appeeky/social/accounts.yaml (tiktok:@handle)")
+    .option("--post <id>", "Only comments on this post (an Appeeky post id)")
+    .option("--limit <n>", "How many (up to 200)", "50")
+    .action(async (opts: { unanswered: boolean; account?: string; post?: string; limit: string }) => {
+      const a = socialApi();
+      const accounts = await readAccounts(resolve(g().cwd));
+      let accountId = opts.account;
+      if (opts.account) {
+        const found = resolveAccounts({ accounts: [opts.account] }, accounts);
+        if (found.ambiguous.length) throw new Error(`${opts.account} matches several accounts (${found.ambiguous[0]!.choices.join(", ")}): name one`);
+        if (found.accounts.length === 1) accountId = found.accounts[0]!.id;
+      }
+      const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+      const comments = await listComments(a, { unanswered: opts.unanswered, accountId, postId: opts.post, limit }, accounts);
+      if (g().json) {
+        printJson({ comments });
+        return;
+      }
+      if (!comments.length) {
+        console.log(c.dim(opts.unanswered ? "No unanswered comments." : "No comments."));
+        return;
+      }
+      for (const x of comments) {
+        const state = x.own ? c.dim(" (you)") : x.repliedAt ? c.green(" replied") : x.hidden ? c.dim(" hidden") : "";
+        console.log(`${c.bold(x.id)} ${x.platform} ${x.account}${x.at ? c.dim(` ${x.at.slice(0, 16).replace("T", " ")}`) : ""}${state}`);
+        console.log(`  ${x.author ? `${x.author}: ` : ""}${x.text}`);
+        if (x.replyText) console.log(c.dim(`  ↳ ${x.replyText}`));
+      }
+      if (opts.unanswered) console.log(c.dim(`\nReply with: appeeky-spec social reply <id> "<message>"`));
+    });
+
+  social
+    .command("reply")
+    .description("Reply to a comment from the account it is on. Checks the platform's length limit first")
+    .argument("<commentId>", "The comment id from `social comments`")
+    .argument("<message>", "The reply")
+    .action(async (commentId: string, message: string) => {
+      const a = socialApi();
+      const platform = await commentPlatform(a, resolve(g().cwd), commentId);
+      const result = await replyToComment(a, commentId, message, platform);
+      if (g().json) printJson(result);
+      else console.log(c.green(`Replied to ${commentId}${platform ? ` on ${platform}` : ""}.`));
+    });
+
+  social
+    .command("hide")
+    .description("Hide a comment from the public (Facebook, Instagram, Threads, X, TikTok)")
+    .argument("<commentId>", "The comment id from `social comments`")
+    .option("--unhide", "Show it again", false)
+    .action(async (commentId: string, opts: { unhide: boolean }) => {
+      const result = await hideComment(socialApi(), commentId, !opts.unhide);
+      if (g().json) printJson({ commentId, ...result });
+      else console.log(c.green(`${result.hidden ? "Hid" : "Unhid"} ${commentId}.`));
+    });
+
+  social
+    .command("like")
+    .description("Like a comment from the account it is on")
+    .argument("<commentId>", "The comment id from `social comments`")
+    .action(async (commentId: string) => {
+      await likeComment(socialApi(), commentId);
+      if (g().json) printJson({ commentId, liked: true });
+      else console.log(c.green(`Liked ${commentId}.`));
+    });
+
+  social
+    .command("delete-comment")
+    .description("Delete a comment on the platform. Asks first; pass --yes when not in a terminal")
+    .argument("<commentId>", "The comment id from `social comments`")
+    .option("-y, --yes", "Delete without asking", false)
+    .action(async (commentId: string, opts: { yes: boolean }) => {
+      const a = socialApi();
+      if (!opts.yes) {
+        if (!process.stdin.isTTY) throw new Error("Not a terminal: pass --yes to delete the comment. Deleting can't be undone.");
+        if (!(await confirm(`Delete comment ${commentId}? This can't be undone.`))) {
+          if (g().json) printJson({ commentId, deleted: false });
+          else console.log(c.dim("Not deleted."));
+          return;
+        }
+      }
+      await deleteComment(a, commentId);
+      if (g().json) printJson({ commentId, deleted: true });
+      else console.log(c.green(`Deleted ${commentId}.`));
     });
 
   const ugc = program.command("ugc").description("UGC from your Appeeky creator personas: clips in the repo, and videos made from briefs (needs APPEEKY_API_KEY)");

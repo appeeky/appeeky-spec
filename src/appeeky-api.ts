@@ -69,10 +69,10 @@ export class AppeekyApi {
     return body?.data as T;
   }
 
-  async post<T>(path: string, body: unknown): Promise<T> {
+  async post<T>(path: string, body: unknown, options: { headers?: Record<string, string> } = {}): Promise<T> {
     const res = await this.fetcher(this.base + path, {
       method: "POST",
-      headers: { "X-API-Key": this.apiKey, "Content-Type": "application/json", "User-Agent": "appeeky-spec" },
+      headers: { "X-API-Key": this.apiKey, "Content-Type": "application/json", "User-Agent": "appeeky-spec", ...options.headers },
       body: JSON.stringify(body),
     });
     const json = (await res.json().catch(() => null)) as ({ data?: T } & ErrorBody) | null;
